@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: proof
+      POSTGRES_PASSWORD: proof_dev
+      POSTGRES_DB: proof
+    ports:
+      - "5432:5432"
+    volumes:
+      - proof_data:/var/lib/postgresql/data
+
+volumes:
+  proof_data:
