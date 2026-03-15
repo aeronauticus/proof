@@ -1202,70 +1202,112 @@ function DashboardContent() {
       </div>
       )}
 
-      {/* This Week — Tests with Study Progress */}
+      {/* Upcoming Tests with Study Plan */}
       {studyProgress.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-3">
-            Upcoming Tests
-          </h3>
-          <div className="space-y-3">
-            {studyProgress.map((test) => {
-              const days = daysUntil(test.testDate);
-              const pct = test.totalSessions > 0
-                ? Math.round((test.completedSessions / test.totalSessions) * 100)
-                : 0;
-              return (
-                <div key={test.testId} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: test.subjectColor }}
-                      />
-                      <span className="text-sm text-gray-800 font-medium truncate">
-                        {test.subjectName} {test.testType}
+        <div className="space-y-3">
+          {studyProgress.map((test) => {
+            const days = daysUntil(test.testDate);
+            const pct = test.totalSessions > 0
+              ? Math.round((test.completedSessions / test.totalSessions) * 100)
+              : 0;
+            const techniqueLabels: Record<string, string> = {
+              review: "Review Notes",
+              active_recall: "Active Recall",
+              practice_test: "Practice Test",
+              spaced_review: "Final Review",
+              elaboration: "Deep Dive",
+              interleaving: "Mixed Practice",
+            };
+            const isToday = test.nextSession?.sessionDate === today;
+            const sessionDay = test.nextSession
+              ? new Date(test.nextSession.sessionDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" })
+              : null;
+
+            return (
+              <div key={test.testId} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                {/* Header */}
+                <div className="px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: test.subjectColor }}
+                    />
+                    <span className="text-sm text-gray-800 font-medium">{test.subjectName} {test.testType}</span>
+                  </div>
+                  <span
+                    className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                      days <= 1
+                        ? "bg-red-100 text-red-700"
+                        : days <= 3
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-blue-100 text-blue-700"
+                    }`}
+                  >
+                    {days === 0 ? "TODAY" : days === 1 ? "Tomorrow" : `${days} days`}
+                  </span>
+                </div>
+
+                {/* Test title */}
+                <div className="px-4 -mt-1 pb-2">
+                  <p className="text-xs text-gray-500">{test.testTitle}</p>
+                </div>
+
+                {/* Study progress bar */}
+                {test.totalSessions > 0 && (
+                  <div className="px-4 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                        <div
+                          className="h-1.5 rounded-full transition-all"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: pct >= 80 ? "#22C55E" : pct >= 40 ? "#EAB308" : "#8B5CF6",
+                          }}
+                        />
+                      </div>
+                      <span className="text-[11px] text-gray-400 flex-shrink-0">
+                        {test.completedSessions}/{test.totalSessions} studied
                       </span>
                     </div>
-                    <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                        days <= 1
-                          ? "bg-red-100 text-red-700"
-                          : days <= 3
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-blue-100 text-blue-700"
-                      }`}
-                    >
-                      {days === 0 ? "TODAY" : days === 1 ? "Tomorrow" : `${days} days`}
-                    </span>
                   </div>
-                  <div className="text-xs text-gray-500 ml-4.5 pl-0.5">{test.testTitle}</div>
-                  {test.totalSessions > 0 && (
-                    <div className="ml-4.5 pl-0.5">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                          <div
-                            className="h-1.5 rounded-full transition-all"
-                            style={{
-                              width: `${pct}%`,
-                              backgroundColor: pct >= 80 ? "#22C55E" : pct >= 40 ? "#EAB308" : "#8B5CF6",
-                            }}
-                          />
-                        </div>
-                        <span className="text-[11px] text-gray-400 flex-shrink-0">
-                          {test.completedSessions}/{test.totalSessions} studied
-                        </span>
-                      </div>
-                      {test.nextSession && test.nextSession.sessionDate === today && (
-                        <p className="text-[11px] text-purple-600 mt-1 font-medium">
-                          Today: {test.nextSession.title} ({test.nextSession.durationMin} min)
-                        </p>
-                      )}
+                )}
+
+                {/* Next study session — always show if one exists */}
+                {test.nextSession && (
+                  <div className={`px-4 py-3 border-t ${isToday ? "bg-purple-50 border-purple-100" : "bg-gray-50 border-gray-100"}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        isToday ? "bg-purple-200 text-purple-800" : "bg-gray-200 text-gray-600"
+                      }`}>
+                        {isToday ? "STUDY TODAY" : `STUDY ${sessionDay?.toUpperCase()}`}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        isToday ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500"
+                      }`}>
+                        {techniqueLabels[test.nextSession.technique] || test.nextSession.technique}
+                      </span>
+                      <span className="text-[10px] text-gray-400">{test.nextSession.durationMin} min</span>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    <p className={`text-sm font-medium ${isToday ? "text-purple-900" : "text-gray-700"}`}>
+                      {test.nextSession.title}
+                    </p>
+                    {test.nextSession.description && (
+                      <p className={`text-xs mt-1 leading-relaxed ${isToday ? "text-purple-700" : "text-gray-500"}`}>
+                        {test.nextSession.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* All done */}
+                {test.totalSessions > 0 && !test.nextSession && (
+                  <div className="px-4 py-2 border-t border-green-100 bg-green-50">
+                    <p className="text-xs text-green-700 font-medium">All study sessions complete!</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
