@@ -939,8 +939,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Step 1: Planner Photo (school days only) */}
-      {isSchoolDay && (
+      {/* Step 1: Planner Photo (always visible — Jack may upload on weekends too) */}
       <div className={`rounded-xl p-4 border-2 ${
         hasPlannerPhoto
           ? "bg-green-50 border-green-200"
@@ -977,7 +976,6 @@ function DashboardContent() {
           )}
         </div>
       </div>
-      )}
 
       {/* Planner AI extraction review */}
       {plannerExtraction && (
@@ -995,7 +993,7 @@ function DashboardContent() {
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
             completionPct === 100 ? "bg-green-500 text-white" : "bg-blue-500 text-white"
           }`}>
-            {completionPct === 100 ? "✓" : isSchoolDay ? "2" : "1"}
+            {completionPct === 100 ? "✓" : "2"}
           </div>
           <div className="flex-1">
             <h3 className="font-semibold text-gray-800">{isSchoolDay ? "Daily Checklist" : "Weekend Checklist"}</h3>
