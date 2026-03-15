@@ -25,7 +25,12 @@ export default function LoginPage() {
           router.replace("/dashboard");
           return;
         }
-        setUsers(data.users);
+        setUsers(data.users || []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Auth check failed:", err);
+        setError("Failed to connect. Check server logs.");
         setLoading(false);
       });
   }, [router]);

@@ -38,6 +38,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
         setSession(data.session);
         setLoading(false);
+      })
+      .catch(() => {
+        router.replace("/login");
       });
   }, [router]);
 
