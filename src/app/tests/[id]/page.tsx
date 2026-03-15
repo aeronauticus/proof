@@ -169,7 +169,8 @@ function TestDetailContent() {
   const [showGuide, setShowGuide] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
   const [generatingGuide, setGeneratingGuide] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
+  const [previewMaterial, setPreviewMaterial] = useState<StudyMaterial | null>(null);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -238,28 +239,40 @@ function TestDetailContent() {
     setUploadingMaterial(true);
 
     const total = files.length;
-    setUploadProgress({ done: 0, total });
+    let failed = 0;
+    setUploadProgress({ done: 0, total, failed: 0 });
 
-    // Process in batches of 3 to avoid overwhelming the server
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < total; i += BATCH_SIZE) {
-      const batch = Array.from(files).slice(i, i + BATCH_SIZE);
-      const promises = batch.map(async (file) => {
-        const downsampled = await downsampleImage(file);
-        const formData = new FormData();
-        formData.append("photos", downsampled);
-        return fetch(`/api/tests/${test!.id}/materials`, {
+    // Upload one at a time so we get immediate per-photo feedback
+    for (let i = 0; i < total; i++) {
+      const downsampled = await downsampleImage(files[i]);
+      const formData = new FormData();
+      formData.append("photos", downsampled);
+
+      try {
+        const res = await fetch(`/api/tests/${test!.id}/materials`, {
           method: "POST",
           body: formData,
         });
-      });
-      await Promise.all(promises);
-      setUploadProgress({ done: Math.min(i + BATCH_SIZE, total), total });
+        const data = await res.json();
+        if (data.ok && data.materials) {
+          const newMat = data.materials[0] as StudyMaterial;
+          // Add to local state immediately so user sees each photo appear
+          setMaterials((prev) => [...prev, newMat]);
+          if (!newMat.extractedContent) failed++;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+
+      setUploadProgress({ done: i + 1, total, failed });
     }
 
     setUploadingMaterial(false);
     setUploadProgress(null);
     if (materialFileRef.current) materialFileRef.current.value = "";
+    // Final sync to ensure consistency with server
     loadTest();
   }
 
@@ -424,33 +437,107 @@ function TestDetailContent() {
 
             {materials.length === 0 && !uploadingMaterial && (
               <p className="text-sm text-gray-500 mb-3">
-                Upload photos of your textbook pages, handouts, or notes. The AI will create a study guide for you.
+                Upload photos of your textbook pages, handouts, or notes. The AI will read each one and show you what it found.
               </p>
             )}
+
+            {/* Summary: X of Y read successfully */}
+            {materials.length > 0 && (() => {
+              const readOk = materials.filter((m) => m.extractedContent).length;
+              const readFail = materials.length - readOk;
+              return (
+                <div className="flex items-center gap-2 mb-2 text-sm">
+                  <span className="text-green-700 font-medium">{readOk} read OK</span>
+                  {readFail > 0 && (
+                    <span className="text-red-600 font-medium">{readFail} couldn&apos;t read</span>
+                  )}
+                  <span className="text-gray-400">of {materials.length} photo{materials.length !== 1 ? "s" : ""}</span>
+                </div>
+              );
+            })()}
 
             {/* Material thumbnails */}
             {materials.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
-                {materials.map((m) => (
-                  <div key={m.id} className="relative flex-shrink-0">
-                    <img
-                      src={m.photoPath}
-                      alt="Study material"
-                      className="h-20 w-20 object-cover rounded-lg border border-gray-200"
-                    />
-                    <button
-                      onClick={() => handleDeleteMaterial(m.id)}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
-                    >
-                      &times;
-                    </button>
-                    {m.extractedContent && (
-                      <span className="absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 bg-black/60 text-white rounded">
-                        {m.extractedContent.sourceType}
+                {materials.map((m) => {
+                  const ok = !!m.extractedContent;
+                  return (
+                    <div key={m.id} className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
+                        className="block"
+                      >
+                        <img
+                          src={m.photoPath}
+                          alt="Study material"
+                          className={`h-20 w-20 object-cover rounded-lg border-2 ${
+                            ok ? "border-green-400" : "border-red-400"
+                          } ${previewMaterial?.id === m.id ? "ring-2 ring-blue-500" : ""}`}
+                        />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMaterial(m.id)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+                      >
+                        &times;
+                      </button>
+                      {/* Status badge */}
+                      <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${
+                        ok ? "bg-green-600/80 text-white" : "bg-red-600/80 text-white"
+                      }`}>
+                        {ok ? (m.extractedContent?.sourceType || "OK") : "failed"}
                       </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Preview panel for tapped thumbnail */}
+            {previewMaterial && (
+              <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-gray-700">
+                    {previewMaterial.extractedContent
+                      ? `Extracted text (${previewMaterial.extractedContent.sourceType})`
+                      : "Could not read this photo"}
+                  </span>
+                  <button
+                    onClick={() => setPreviewMaterial(null)}
+                    className="text-gray-400 hover:text-gray-600 text-xs"
+                  >
+                    Close
+                  </button>
+                </div>
+                {previewMaterial.extractedContent ? (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <p className="text-gray-600 whitespace-pre-line text-xs leading-relaxed">
+                      {previewMaterial.extractedContent.rawText.slice(0, 500)}
+                      {previewMaterial.extractedContent.rawText.length > 500 && "..."}
+                    </p>
+                    {previewMaterial.extractedContent.highlightedText.length > 0 && (
+                      <div>
+                        <span className="text-[10px] font-bold text-amber-700 uppercase">Highlighted:</span>
+                        <p className="text-xs text-amber-800 bg-yellow-100 rounded px-1.5 py-1 mt-0.5">
+                          {previewMaterial.extractedContent.highlightedText.join("; ")}
+                        </p>
+                      </div>
+                    )}
+                    {previewMaterial.extractedContent.handwrittenNotes.length > 0 && (
+                      <div>
+                        <span className="text-[10px] font-bold text-blue-700 uppercase">Your notes:</span>
+                        <p className="text-xs text-blue-800 bg-blue-50 rounded px-1.5 py-1 mt-0.5">
+                          {previewMaterial.extractedContent.handwrittenNotes.join("; ")}
+                        </p>
+                      </div>
                     )}
                   </div>
-                ))}
+                ) : (
+                  <p className="text-red-600 text-xs">
+                    The AI couldn&apos;t read this photo. Try deleting it and retaking with better lighting or a clearer angle.
+                  </p>
+                )}
               </div>
             )}
 
@@ -475,7 +562,7 @@ function TestDetailContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               {uploadingMaterial && uploadProgress
-                ? `Reading photos... ${uploadProgress.done}/${uploadProgress.total}`
+                ? `Reading photo ${uploadProgress.done}/${uploadProgress.total}${uploadProgress.failed > 0 ? ` (${uploadProgress.failed} failed)` : ""}...`
                 : uploadingMaterial
                   ? "Reading your materials..."
                   : materials.length > 0
@@ -484,19 +571,29 @@ function TestDetailContent() {
             </button>
 
             {/* Done uploading → generate study guide */}
-            {materials.length > 0 && !uploadingMaterial && (
-              <button
-                onClick={handleGenerateGuide}
-                disabled={generatingGuide}
-                className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-70 transition-colors"
-              >
-                {generatingGuide
-                  ? "Creating your study guide & practice quiz..."
-                  : studyGuide
-                    ? "Regenerate Study Guide & Quiz"
-                    : "Done Uploading — Generate Study Guide"}
-              </button>
-            )}
+            {materials.length > 0 && !uploadingMaterial && (() => {
+              const readableCount = materials.filter((m) => m.extractedContent).length;
+              return (
+                <>
+                  {readableCount === 0 && (
+                    <p className="mt-2 text-sm text-red-600 font-medium text-center">
+                      None of your photos could be read. Try retaking them with better lighting.
+                    </p>
+                  )}
+                  <button
+                    onClick={handleGenerateGuide}
+                    disabled={generatingGuide || readableCount === 0}
+                    className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors"
+                  >
+                    {generatingGuide
+                      ? "Creating your study guide & practice quiz..."
+                      : studyGuide
+                        ? `Regenerate Study Guide & Quiz (${readableCount} readable photos)`
+                        : `Done Uploading — Generate Study Guide (${readableCount} photos)`}
+                  </button>
+                </>
+              );
+            })()}
           </div>
 
           {/* Study Guide */}
