@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { plannerPhotos } from "@/lib/schema";
+import { plannerPhotos, subjects } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
@@ -9,8 +9,9 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { uploadDir, uploadUrl } from "@/lib/uploads";
+import { readPlannerPhoto } from "@/lib/ai/planner-reader";
 
-// POST /api/planner — upload planner photo
+// POST /api/planner — upload planner photo + AI extraction
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -61,7 +62,20 @@ export async function POST(req: NextRequest) {
     photoPath,
   });
 
-  return NextResponse.json({ plannerPhoto: created }, { status: 201 });
+  // Run AI extraction in background — don't block the response
+  let extraction = null;
+  try {
+    const allSubjects = await db.select().from(subjects);
+    const subjectNames = allSubjects.map((s) => s.name);
+    extraction = await readPlannerPhoto(photoPath, date, subjectNames);
+  } catch (err) {
+    console.error("Planner AI extraction failed:", err);
+  }
+
+  return NextResponse.json({
+    plannerPhoto: created,
+    extraction,
+  }, { status: 201 });
 }
 
 // GET /api/planner?date=2026-03-14

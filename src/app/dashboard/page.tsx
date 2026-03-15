@@ -4,6 +4,26 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
 
+interface PlannerAssignment {
+  subject: string;
+  title: string;
+  dueDate: string;
+}
+
+interface PlannerTest {
+  subject: string;
+  type: "test" | "quiz";
+  title: string;
+  testDate: string;
+  topics: string | null;
+}
+
+interface PlannerExtraction {
+  assignments: PlannerAssignment[];
+  tests: PlannerTest[];
+  rawNotes: string;
+}
+
 interface AiHomeworkEval {
   looksLikeHomework: boolean;
   appearsComplete: boolean;
@@ -380,6 +400,132 @@ function ChecklistRow({
   );
 }
 
+/** Review AI-extracted planner items before saving */
+function PlannerReview({
+  extraction,
+  onConfirm,
+  onDismiss,
+}: {
+  extraction: PlannerExtraction;
+  onConfirm: (assignments: PlannerAssignment[], tests: PlannerTest[]) => void;
+  onDismiss: () => void;
+}) {
+  const [assignments, setAssignments] = useState(
+    extraction.assignments.map((a) => ({ ...a, included: true }))
+  );
+  const [plannerTests, setPlannerTests] = useState(
+    extraction.tests.map((t) => ({ ...t, included: true }))
+  );
+  const [saving, setSaving] = useState(false);
+
+  const totalItems = assignments.length + plannerTests.length;
+
+  if (totalItems === 0) {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <h3 className="font-semibold text-blue-800 text-sm mb-1">Planner Read</h3>
+        <p className="text-sm text-blue-700">
+          {extraction.rawNotes
+            ? "AI couldn't find any assignments or tests in your planner today."
+            : "Couldn't read the planner photo. Make sure it's clear and well-lit."}
+        </p>
+        <button
+          onClick={onDismiss}
+          className="mt-2 text-xs text-blue-600 font-medium"
+        >
+          OK
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-blue-800">
+          AI found {totalItems} item{totalItems !== 1 ? "s" : ""} in your planner
+        </h3>
+        <button onClick={onDismiss} className="text-xs text-gray-400">Skip</button>
+      </div>
+      <p className="text-xs text-blue-600">Uncheck anything that&apos;s wrong, then tap Save.</p>
+
+      {/* Assignments */}
+      {assignments.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Assignments</p>
+          {assignments.map((a, i) => (
+            <label key={i} className="flex items-start gap-2 py-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={a.included}
+                onChange={() => {
+                  const next = [...assignments];
+                  next[i] = { ...next[i], included: !next[i].included };
+                  setAssignments(next);
+                }}
+                className="mt-0.5 rounded"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-800">{a.title}</div>
+                <div className="text-xs text-gray-500">{a.subject} — due {a.dueDate}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {/* Tests */}
+      {plannerTests.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Tests / Quizzes</p>
+          {plannerTests.map((t, i) => (
+            <label key={i} className="flex items-start gap-2 py-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={t.included}
+                onChange={() => {
+                  const next = [...plannerTests];
+                  next[i] = { ...next[i], included: !next[i].included };
+                  setPlannerTests(next);
+                }}
+                className="mt-0.5 rounded"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-800">
+                  <span className="uppercase text-[10px] font-bold px-1 py-0.5 rounded bg-amber-100 text-amber-700 mr-1">{t.type}</span>
+                  {t.title}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {t.subject} — {t.testDate}
+                  {t.topics && ` — ${t.topics}`}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={async () => {
+          setSaving(true);
+          const selectedAssignments = assignments
+            .filter((a) => a.included)
+            .map(({ included, ...rest }) => rest);
+          const selectedTests = plannerTests
+            .filter((t) => t.included)
+            .map(({ included, ...rest }) => rest);
+          await onConfirm(selectedAssignments, selectedTests);
+          setSaving(false);
+        }}
+        disabled={saving}
+        className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+      >
+        {saving ? "Saving..." : `Save ${assignments.filter((a) => a.included).length + plannerTests.filter((t) => t.included).length} Items`}
+      </button>
+    </div>
+  );
+}
+
 function DashboardContent() {
   const session = useSession();
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -392,6 +538,7 @@ function DashboardContent() {
   const [isSchoolDay, setIsSchoolDay] = useState(true);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [plannerExtraction, setPlannerExtraction] = useState<PlannerExtraction | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -515,9 +662,25 @@ function DashboardContent() {
     formData.append("photo", file);
     formData.append("date", today);
 
-    await fetch("/api/planner", { method: "POST", body: formData });
+    const res = await fetch("/api/planner", { method: "POST", body: formData });
+    const data = await res.json();
     setUploading(false);
-    loadData();
+    await loadData();
+
+    // Show extraction review if AI found items
+    if (data.extraction) {
+      setPlannerExtraction(data.extraction);
+    }
+  }
+
+  async function handlePlannerConfirm(assignments: PlannerAssignment[], tests: PlannerTest[]) {
+    await fetch("/api/planner/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignments, tests }),
+    });
+    setPlannerExtraction(null);
+    loadData(); // reload to show new assignments/tests
   }
 
   async function handleCompleteAssignment(id: number) {
@@ -814,6 +977,15 @@ function DashboardContent() {
           )}
         </div>
       </div>
+      )}
+
+      {/* Planner AI extraction review */}
+      {plannerExtraction && (
+        <PlannerReview
+          extraction={plannerExtraction}
+          onConfirm={handlePlannerConfirm}
+          onDismiss={() => setPlannerExtraction(null)}
+        />
       )}
 
       {/* Step 2: Daily Checklist */}
