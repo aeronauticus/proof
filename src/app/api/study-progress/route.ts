@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { studySessions, studyPlans, tests, subjects } from "@/lib/schema";
+import { studySessions, studyPlans, tests, subjects, studyMaterials } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
@@ -55,10 +55,15 @@ export async function GET(req: NextRequest) {
       .where(eq(studyPlans.testId, test.testId));
 
     if (plans.length === 0) {
+      const materialsRows = await db
+        .select({ id: studyMaterials.id })
+        .from(studyMaterials)
+        .where(eq(studyMaterials.testId, test.testId));
       result.push({
         ...test,
         totalSessions: 0,
         completedSessions: 0,
+        materialCount: materialsRows.length,
         sessions: [],
       });
       continue;
@@ -83,11 +88,18 @@ export async function GET(req: NextRequest) {
       (s) => !s.completed && s.sessionDate >= today
     );
 
+    // Count study materials uploaded for this test
+    const materialsRows = await db
+      .select({ id: studyMaterials.id })
+      .from(studyMaterials)
+      .where(eq(studyMaterials.testId, test.testId));
+
     result.push({
       ...test,
       totalSessions: sessions.length,
       completedSessions,
       nextSession: nextSession || null,
+      materialCount: materialsRows.length,
       sessions,
     });
   }
