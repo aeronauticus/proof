@@ -14,7 +14,7 @@ interface ChecklistItem {
   subjectId: number | null;
   orderIndex: number;
   notes: string | null;
-  photoPath: string | null;
+  photoPaths: string[] | null;
 }
 
 interface ScheduleSlot {
@@ -71,18 +71,21 @@ function ChecklistRow({
   item,
   hasPlannerPhoto,
   onToggle,
-  onHomeworkPhoto,
+  onAddPhoto,
+  onCompleteHomework,
   onReadingNotes,
 }: {
   item: ChecklistItem;
   hasPlannerPhoto: boolean;
   onToggle: (id: number) => void;
-  onHomeworkPhoto: (id: number, file: File) => void;
+  onAddPhoto: (id: number, file: File) => Promise<void>;
+  onCompleteHomework: (id: number) => void;
   onReadingNotes: (id: number, notes: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [readingText, setReadingText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isHomework = item.title === "Homework";
@@ -112,8 +115,12 @@ function ChecklistRow({
           )}
         </div>
         {/* Show proof inline */}
-        {item.photoPath && (
-          <img src={item.photoPath} alt="Homework" className="mt-2 rounded-lg border border-gray-200 max-h-32 object-cover" />
+        {item.photoPaths && item.photoPaths.length > 0 && (
+          <div className="mt-2 flex gap-2 overflow-x-auto">
+            {item.photoPaths.map((path, i) => (
+              <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-24 w-24 object-cover flex-shrink-0" />
+            ))}
+          </div>
         )}
         {item.notes && isReading && (
           <p className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">{item.notes}</p>
@@ -136,13 +143,16 @@ function ChecklistRow({
         <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
         <span className="flex-1 text-sm text-gray-800">{item.title}</span>
         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">
-          {isHomework ? "Photo" : "Write"}
+          {isHomework
+            ? (item.photoPaths?.length ? `${item.photoPaths.length} photo${item.photoPaths.length > 1 ? "s" : ""}` : "Photo")
+            : "Write"}
         </span>
       </button>
     );
   }
 
   if (isHomework && expanded) {
+    const photos = item.photoPaths || [];
     return (
       <div className="px-4 py-3 space-y-2">
         <div className="flex items-center gap-3">
@@ -150,7 +160,19 @@ function ChecklistRow({
           <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
           <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
         </div>
-        <p className="text-xs text-gray-500 ml-8">Take a photo of your completed homework.</p>
+        <p className="text-xs text-gray-500 ml-8">
+          {photos.length === 0
+            ? "Take a photo of your completed homework."
+            : `${photos.length} photo${photos.length > 1 ? "s" : ""} uploaded. Add more or tap Done.`}
+        </p>
+        {/* Thumbnails of uploaded photos */}
+        {photos.length > 0 && (
+          <div className="ml-8 flex gap-2 overflow-x-auto">
+            {photos.map((path, i) => (
+              <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-20 w-20 object-cover flex-shrink-0" />
+            ))}
+          </div>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -160,23 +182,37 @@ function ChecklistRow({
           onChange={async (e) => {
             const file = e.target.files?.[0];
             if (!file) return;
-            setSubmitting(true);
-            await onHomeworkPhoto(item.id, file);
-            setSubmitting(false);
-            setExpanded(false);
+            setUploading(true);
+            await onAddPhoto(item.id, file);
+            setUploading(false);
+            // Reset input so same file can be re-selected
+            if (fileRef.current) fileRef.current.value = "";
           }}
         />
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={submitting}
-          className="ml-8 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          {submitting ? "Uploading..." : "Take Photo"}
-        </button>
+        <div className="ml-8 flex gap-2">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-gray-200"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {uploading ? "Uploading..." : photos.length > 0 ? "Add Photo" : "Take Photo"}
+          </button>
+          {photos.length > 0 && (
+            <button
+              onClick={() => {
+                onCompleteHomework(item.id);
+                setExpanded(false);
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+            >
+              Done
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -311,12 +347,21 @@ function DashboardContent() {
     loadData();
   }
 
-  async function handleHomeworkPhoto(itemId: number, file: File) {
+  async function handleAddPhoto(itemId: number, file: File) {
     const formData = new FormData();
     formData.append("itemId", itemId.toString());
-    formData.append("action", "complete");
-    formData.append("photo", file);
+    formData.append("action", "add_photos");
+    formData.append("photos", file);
     await fetch("/api/checklist", { method: "PATCH", body: formData });
+    await loadData();
+  }
+
+  async function handleCompleteHomework(itemId: number) {
+    await fetch("/api/checklist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, action: "complete" }),
+    });
     loadData();
   }
 
@@ -536,8 +581,12 @@ function DashboardContent() {
                   )}
                 </div>
                 {/* Show proof submitted by Jack */}
-                {item.photoPath && (
-                  <img src={item.photoPath} alt="Homework proof" className="mt-2 ml-8 rounded-lg border border-gray-200 max-h-40 object-cover" />
+                {item.photoPaths && item.photoPaths.length > 0 && (
+                  <div className="mt-2 ml-8 flex gap-2 overflow-x-auto">
+                    {item.photoPaths.map((path, i) => (
+                      <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-28 w-28 object-cover flex-shrink-0" />
+                    ))}
+                  </div>
                 )}
                 {item.notes && item.title === "Reading / Memory Work" && (
                   <p className="mt-1 ml-8 text-xs text-gray-600 bg-white/50 rounded p-2">{item.notes}</p>
@@ -674,7 +723,8 @@ function DashboardContent() {
               item={item}
               hasPlannerPhoto={hasPlannerPhoto}
               onToggle={handleChecklistToggle}
-              onHomeworkPhoto={handleHomeworkPhoto}
+              onAddPhoto={handleAddPhoto}
+              onCompleteHomework={handleCompleteHomework}
               onReadingNotes={handleReadingNotes}
             />
           ))}

@@ -208,21 +208,68 @@ export async function PATCH(req: NextRequest) {
   let itemId: number;
   let action: string;
   let notes: string | null = null;
-  let photoFile: File | null = null;
+  let photoFiles: File[] = [];
 
   if (contentType.includes("multipart/form-data")) {
-    // FormData — used for homework photo upload
+    // FormData — used for photo uploads
     const formData = await req.formData();
     itemId = parseInt(formData.get("itemId") as string);
     action = formData.get("action") as string;
     notes = (formData.get("notes") as string) || null;
-    photoFile = formData.get("photo") as File | null;
+    photoFiles = formData.getAll("photos") as File[];
+    // Also support single "photo" field for backwards compat
+    const single = formData.get("photo") as File | null;
+    if (single && photoFiles.length === 0) photoFiles = [single];
   } else {
     // JSON — used for simple complete/verify and reading notes
     const body = await req.json();
     itemId = body.itemId;
     action = body.action;
     notes = body.notes || null;
+  }
+
+  // Helper: save multiple photos, return array of paths
+  async function savePhotos(files: File[], date: string, id: number): Promise<string[]> {
+    const uploadDir = join(process.cwd(), "public", "uploads", "checklist");
+    await mkdir(uploadDir, { recursive: true });
+    const paths: string[] = [];
+    for (const file of files) {
+      const ext = file.name.split(".").pop() || "jpg";
+      const filename = `checklist-${date}-${id}-${randomUUID()}.${ext}`;
+      const filepath = join(uploadDir, filename);
+      const bytes = await file.arrayBuffer();
+      await writeFile(filepath, Buffer.from(bytes));
+      paths.push(`/uploads/checklist/${filename}`);
+    }
+    return paths;
+  }
+
+  // Action: add_photos — upload photos to an item without marking it complete
+  if (action === "add_photos") {
+    const item = await db
+      .select()
+      .from(dailyChecklist)
+      .where(eq(dailyChecklist.id, itemId))
+      .then((rows) => rows[0]);
+
+    if (!item) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+
+    if (photoFiles.length === 0) {
+      return NextResponse.json({ error: "No photos provided" }, { status: 400 });
+    }
+
+    const newPaths = await savePhotos(photoFiles, item.date, itemId);
+    const existing = (item.photoPaths as string[] | null) || [];
+    const allPaths = [...existing, ...newPaths];
+
+    await db
+      .update(dailyChecklist)
+      .set({ photoPaths: allPaths })
+      .where(eq(dailyChecklist.id, itemId));
+
+    return NextResponse.json({ ok: true, photoPaths: allPaths });
   }
 
   if (action === "complete") {
@@ -252,11 +299,12 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Gate: Homework requires a photo
+    // Gate: Homework requires at least one photo
     if (item.title === "Homework") {
-      if (!photoFile) {
+      const existing = (item.photoPaths as string[] | null) || [];
+      if (existing.length === 0 && photoFiles.length === 0) {
         return NextResponse.json(
-          { error: "Photo of completed homework is required" },
+          { error: "At least one photo of completed homework is required" },
           { status: 400 }
         );
       }
@@ -272,18 +320,12 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Save photo if provided
-    let photoPath: string | null = null;
-    if (photoFile) {
-      const ext = photoFile.name.split(".").pop() || "jpg";
-      const filename = `checklist-${item.date}-${itemId}-${randomUUID()}.${ext}`;
-      const uploadDir = join(process.cwd(), "public", "uploads", "checklist");
-      await mkdir(uploadDir, { recursive: true });
-      const filepath = join(uploadDir, filename);
-      const bytes = await photoFile.arrayBuffer();
-      await writeFile(filepath, Buffer.from(bytes));
-      photoPath = `/uploads/checklist/${filename}`;
-    }
+    // Save any new photos
+    const newPaths = photoFiles.length > 0
+      ? await savePhotos(photoFiles, item.date, itemId)
+      : [];
+    const existingPaths = (item.photoPaths as string[] | null) || [];
+    const allPaths = [...existingPaths, ...newPaths];
 
     await db
       .update(dailyChecklist)
@@ -291,16 +333,16 @@ export async function PATCH(req: NextRequest) {
         completed: true,
         completedAt: new Date(),
         notes: notes || item.notes,
-        photoPath: photoPath || item.photoPath,
+        photoPaths: allPaths.length > 0 ? allPaths : item.photoPaths,
       })
       .where(eq(dailyChecklist.id, itemId));
 
     await logAction(session.userId, "complete", "checklist", itemId, null, {
-      hasPhoto: !!photoPath,
+      photoCount: allPaths.length,
       hasNotes: !!notes,
     });
 
-    return NextResponse.json({ ok: true, photoPath });
+    return NextResponse.json({ ok: true, photoPaths: allPaths });
   }
 
   if (action === "verify") {
