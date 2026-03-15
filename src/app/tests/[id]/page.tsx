@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import Lightbox from "@/components/ui/Lightbox";
 
 interface Test {
   id: number;
@@ -172,6 +173,7 @@ function TestDetailContent() {
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
   const [previewMaterial, setPreviewMaterial] = useState<StudyMaterial | null>(null);
   const [guideError, setGuideError] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -276,8 +278,13 @@ function TestDetailContent() {
     setUploadingMaterial(false);
     setUploadProgress(null);
     if (materialFileRef.current) materialFileRef.current.value = "";
-    // Final sync to ensure consistency with server
-    loadTest();
+    // Final sync then auto-generate/update study guide
+    await loadTest();
+    // Only generate if there are readable materials
+    const readable = [...materials].filter((m) => m.extractedContent).length + (total - failed);
+    if (readable > 0) {
+      handleGenerateGuide();
+    }
   }
 
   async function handleGenerateGuide() {
@@ -476,13 +483,13 @@ function TestDetailContent() {
             {/* Material thumbnails */}
             {materials.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
-                {materials.map((m) => {
+                {materials.map((m, idx) => {
                   const ok = !!m.extractedContent;
                   return (
                     <div key={m.id} className="relative flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
+                        onClick={() => setLightboxIndex(idx)}
                         className="block"
                       >
                         <img
@@ -490,14 +497,24 @@ function TestDetailContent() {
                           alt="Study material"
                           className={`h-20 w-20 object-cover rounded-lg border-2 ${
                             ok ? "border-green-400" : "border-red-400"
-                          } ${previewMaterial?.id === m.id ? "ring-2 ring-blue-500" : ""}`}
+                          }`}
                         />
                       </button>
+                      {/* Delete button */}
                       <button
                         onClick={() => handleDeleteMaterial(m.id)}
                         className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
                       >
                         &times;
+                      </button>
+                      {/* Info button — shows extracted text preview */}
+                      <button
+                        onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
+                        className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          ok ? "bg-green-600 text-white" : "bg-red-600 text-white"
+                        }`}
+                      >
+                        {ok ? "i" : "!"}
                       </button>
                       {/* Status badge */}
                       <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${
@@ -509,6 +526,15 @@ function TestDetailContent() {
                   );
                 })}
               </div>
+            )}
+
+            {/* Lightbox */}
+            {lightboxIndex !== null && materials.length > 0 && (
+              <Lightbox
+                photos={materials.map((m) => m.photoPath)}
+                initialIndex={lightboxIndex}
+                onClose={() => setLightboxIndex(null)}
+              />
             )}
 
             {/* Preview panel for tapped thumbnail */}
@@ -587,41 +613,43 @@ function TestDetailContent() {
                     : "Upload Study Materials"}
             </button>
 
-            {/* Done uploading → generate study guide */}
-            {materials.length > 0 && !uploadingMaterial && (() => {
-              const readableCount = materials.filter((m) => m.extractedContent).length;
-              return (
-                <>
-                  {readableCount === 0 && (
-                    <p className="mt-2 text-sm text-red-600 font-medium text-center">
-                      None of your photos could be read. Try retaking them with better lighting.
-                    </p>
-                  )}
-                  <button
-                    onClick={handleGenerateGuide}
-                    disabled={generatingGuide || readableCount === 0}
-                    className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors"
-                  >
-                    {generatingGuide
-                      ? "Creating your study guide & practice quiz..."
-                      : studyGuide
-                        ? `Regenerate Study Guide & Quiz (${readableCount} readable photos)`
-                        : `Done Uploading — Generate Study Guide (${readableCount} photos)`}
-                  </button>
-                  {generatingGuide && readableCount > 15 && (
-                    <p className="mt-1 text-xs text-gray-500 text-center">
-                      This may take a minute with {readableCount} photos...
-                    </p>
-                  )}
-                  {guideError && (
-                    <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-sm text-red-700 font-medium">Failed to generate study guide</p>
-                      <p className="text-xs text-red-600 mt-1 break-words">{guideError}</p>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
+            {/* Guide generation status */}
+            {generatingGuide && (
+              <div className="mt-2 py-3 text-center">
+                <p className="text-sm text-green-700 font-medium animate-pulse">
+                  Creating your study guide & practice quiz...
+                </p>
+                {materials.filter((m) => m.extractedContent).length > 15 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    This may take a minute with {materials.filter((m) => m.extractedContent).length} photos...
+                  </p>
+                )}
+              </div>
+            )}
+
+            {guideError && (
+              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-700 font-medium">Failed to generate study guide</p>
+                <p className="text-xs text-red-600 mt-1 break-words">{guideError}</p>
+                <button
+                  onClick={handleGenerateGuide}
+                  disabled={generatingGuide}
+                  className="mt-2 text-xs text-red-700 font-medium underline"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {/* Regenerate button — only when guide exists and user wants to refresh */}
+            {studyGuide && !generatingGuide && !guideError && materials.length > 0 && !uploadingMaterial && (
+              <button
+                onClick={handleGenerateGuide}
+                className="w-full mt-2 py-2 text-sm text-green-700 font-medium border border-green-200 rounded-xl hover:bg-green-50 transition-colors"
+              >
+                Regenerate Study Guide ({materials.filter((m) => m.extractedContent).length} photos)
+              </button>
+            )}
           </div>
 
           {/* Study Guide */}

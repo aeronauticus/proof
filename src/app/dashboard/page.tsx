@@ -1446,35 +1446,26 @@ function DashboardContent() {
                   </div>
                 )}
 
-                {/* Prompt to upload study materials */}
-                {test.materialCount === 0 && test.testStatus === "upcoming" && (
+                {/* Study materials prompt — always show for upcoming tests */}
+                {test.testStatus === "upcoming" && (
                   <button
                     onClick={() => router.push(`/tests/${test.testId}`)}
-                    className="w-full px-4 py-2.5 border-t border-amber-100 bg-amber-50 flex items-center gap-2 text-left hover:bg-amber-100 transition-colors"
+                    className={`w-full px-4 py-2.5 border-t flex items-center gap-2 text-left transition-colors ${
+                      test.materialCount === 0
+                        ? "border-amber-100 bg-amber-50 hover:bg-amber-100"
+                        : "border-green-100 bg-green-50/50 hover:bg-green-50"
+                    }`}
                   >
-                    <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className={`w-4 h-4 flex-shrink-0 ${test.materialCount === 0 ? "text-amber-600" : "text-green-600"}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    <span className="text-xs text-amber-800 font-medium">
-                      Upload study materials to get an AI study guide
+                    <span className={`text-xs font-medium ${test.materialCount === 0 ? "text-amber-800" : "text-green-700"}`}>
+                      {test.materialCount === 0
+                        ? "Upload study materials to get an AI study guide"
+                        : `${test.materialCount} photo${test.materialCount !== 1 ? "s" : ""} uploaded — tap to add more`}
                     </span>
-                    <svg className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 ml-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                )}
-
-                {/* Materials uploaded badge */}
-                {test.materialCount > 0 && test.testStatus === "upcoming" && (
-                  <button
-                    onClick={() => router.push(`/tests/${test.testId}`)}
-                    className="w-full px-4 py-2 border-t border-green-100 bg-green-50/50 flex items-center gap-2 text-left hover:bg-green-50 transition-colors"
-                  >
-                    <span className="text-xs text-green-700">
-                      📖 Study guide ready — {test.materialCount} material{test.materialCount !== 1 ? "s" : ""} uploaded
-                    </span>
-                    <svg className="w-3.5 h-3.5 text-green-400 flex-shrink-0 ml-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className={`w-3.5 h-3.5 flex-shrink-0 ml-auto ${test.materialCount === 0 ? "text-amber-400" : "text-green-400"}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
