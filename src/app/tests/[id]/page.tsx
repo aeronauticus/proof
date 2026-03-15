@@ -175,32 +175,35 @@ function TestDetailContent() {
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
-    const res = await fetch(`/api/tests`);
-    const data = await res.json();
-    const found = (data.tests || []).find(
-      (t: Test) => t.id === parseInt(params.id as string)
-    );
-    setTest(found || null);
+    try {
+      const res = await fetch(`/api/tests`);
+      const data = await res.json();
+      const found = (data.tests || []).find(
+        (t: Test) => t.id === parseInt(params.id as string)
+      );
+      setTest(found || null);
 
-    // Load study sessions
-    const sessionsRes = await fetch(
-      `/api/study-sessions?testId=${params.id}`
-    );
-    if (sessionsRes.ok) {
-      const sessionsData = await sessionsRes.json();
-      setStudySessions(sessionsData.sessions || []);
+      // Load study sessions
+      const sessionsRes = await fetch(
+        `/api/study-sessions?testId=${params.id}`
+      );
+      if (sessionsRes.ok) {
+        const sessionsData = await sessionsRes.json();
+        setStudySessions(sessionsData.sessions || []);
+      }
+
+      // Load materials + study guide
+      const materialsRes = await fetch(
+        `/api/tests/${params.id}/materials`
+      );
+      if (materialsRes.ok) {
+        const materialsData = await materialsRes.json();
+        setMaterials(materialsData.materials || []);
+        setStudyGuide(materialsData.studyGuide || null);
+      }
+    } catch (err) {
+      console.error("Failed to load test:", err);
     }
-
-    // Load materials + study guide
-    const materialsRes = await fetch(
-      `/api/tests/${params.id}/materials`
-    );
-    if (materialsRes.ok) {
-      const materialsData = await materialsRes.json();
-      setMaterials(materialsData.materials || []);
-      setStudyGuide(materialsData.studyGuide || null);
-    }
-
     setLoading(false);
   }, [params.id]);
 
@@ -281,18 +284,26 @@ function TestDetailContent() {
     setGeneratingGuide(true);
     setGuideError(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min timeout
       const res = await fetch(`/api/tests/${test!.id}/materials`, {
         method: "PATCH",
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       if (res.ok) {
         await loadTest();
         setShowGuide(true);
       } else {
         const data = await res.json().catch(() => ({}));
-        setGuideError(data.error || `Failed (${res.status})`);
+        setGuideError(data.error || `Server error (${res.status})`);
       }
     } catch (err) {
-      setGuideError("Network error — try again");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setGuideError("Timed out — too many photos. Try removing some and retry.");
+      } else {
+        setGuideError(`Error: ${err instanceof Error ? err.message : "Unknown"}`);
+      }
       console.error("Guide generation failed:", err);
     }
     setGeneratingGuide(false);
@@ -597,10 +608,16 @@ function TestDetailContent() {
                         ? `Regenerate Study Guide & Quiz (${readableCount} readable photos)`
                         : `Done Uploading — Generate Study Guide (${readableCount} photos)`}
                   </button>
-                  {guideError && (
-                    <p className="mt-2 text-sm text-red-600 font-medium text-center">
-                      {guideError}
+                  {generatingGuide && readableCount > 15 && (
+                    <p className="mt-1 text-xs text-gray-500 text-center">
+                      This may take a minute with {readableCount} photos...
                     </p>
+                  )}
+                  {guideError && (
+                    <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-700 font-medium">Failed to generate study guide</p>
+                      <p className="text-xs text-red-600 mt-1 break-words">{guideError}</p>
+                    </div>
                   )}
                 </>
               );

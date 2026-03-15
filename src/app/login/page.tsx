@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 interface UserOption {
@@ -82,6 +82,25 @@ export default function LoginPage() {
     setPin((prev) => prev.slice(0, -1));
     setError("");
   }
+
+  // Keyboard support for PIN entry
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!selectedUser) return;
+      if (e.key >= "0" && e.key <= "9") {
+        handlePinInput(e.key);
+      } else if (e.key === "Backspace") {
+        handleBackspace();
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedUser, pin]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   if (loading) {
     return (
