@@ -773,15 +773,7 @@ function DashboardContent() {
     loadData(); // reload to show new assignments/tests
   }
 
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-gray-400">Loading dashboard...</div>
-      </div>
-    );
-  }
-
+  // Compute these before any early returns so hooks are always called
   const completedCount = checklist.filter((i) => i.completed).length;
   const totalCount = checklist.length;
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -800,6 +792,14 @@ function DashboardContent() {
     }
     prevCompletionRef.current = completionPct;
   }, [completionPct, totalCount, loading, session?.role]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-gray-400">Loading dashboard...</div>
+      </div>
+    );
+  }
 
   // ── Parent View ──────────────────────────────────────────────────────────
   if (session?.role === "parent") {
