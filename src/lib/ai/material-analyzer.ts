@@ -1,0 +1,401 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { readFile } from "fs/promises";
+import { join } from "path";
+import { UPLOAD_BASE } from "@/lib/uploads";
+
+const anthropic = new Anthropic();
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface ExtractedContent {
+  rawText: string;
+  highlightedText: string[];
+  handwrittenNotes: string[];
+  sourceType: "textbook" | "handout" | "notes" | "study_guide" | "other";
+}
+
+export interface StudyGuideContent {
+  keyConcepts: Array<{ concept: string; explanation: string }>;
+  vocabulary: Array<{ term: string; definition: string }>;
+  importantFacts: string[];
+  highlightedPriorities: string[];
+  summary: string;
+}
+
+export interface PracticeQuizQuestion {
+  question: string;
+  choices?: string[];
+  expectedAnswer: string;
+  difficulty: "easy" | "medium" | "hard";
+  sourceHint: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function toImageBlock(base64: string, photoPath: string): Anthropic.ImageBlockParam {
+  const ext = photoPath.split(".").pop()?.toLowerCase();
+  const mediaType =
+    ext === "png"
+      ? "image/png"
+      : ext === "gif"
+        ? "image/gif"
+        : ext === "webp"
+          ? "image/webp"
+          : "image/jpeg";
+
+  return {
+    type: "image",
+    source: { type: "base64", media_type: mediaType, data: base64 },
+  };
+}
+
+async function loadImage(photoPath: string): Promise<{ base64: string; photoPath: string }> {
+  const relativePath = photoPath.replace(/^\/uploads\//, "");
+  const fullPath = join(UPLOAD_BASE, relativePath);
+  const imageBuffer = await readFile(fullPath);
+  return { base64: imageBuffer.toString("base64"), photoPath };
+}
+
+function parseJson<T>(text: string, fallback: T): T {
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]) as T;
+  } catch { /* fall through */ }
+  // Try matching a JSON array
+  try {
+    const arrMatch = text.match(/\[[\s\S]*\]/);
+    if (arrMatch) return JSON.parse(arrMatch[0]) as T;
+  } catch { /* fall through */ }
+  return fallback;
+}
+
+// ── Function 1: Extract content from a single material photo ──────────────────
+
+export async function extractMaterialContent(
+  photoPath: string,
+  subjectName: string,
+  testTopics: string | null
+): Promise<ExtractedContent> {
+  const { base64 } = await loadImage(photoPath);
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2000,
+    messages: [
+      {
+        role: "user",
+        content: [
+          toImageBlock(base64, photoPath),
+          {
+            type: "text",
+            text: `You are helping a 6th grader study for a ${subjectName} test${testTopics ? ` on ${testTopics}` : ""}. This is a photo of study material (textbook page, handout, class notes, or study guide).
+
+Please analyze this image carefully:
+
+1. **OCR**: Read ALL text visible in the image. Include headings, body text, captions, labels.
+2. **Highlighted text**: Identify any text that is highlighted, underlined, circled, starred, or otherwise marked as important. These are the student's priority items.
+3. **Handwritten notes**: Identify any handwritten annotations, margin notes, or additions the student made.
+4. **Source type**: What type of material is this?
+
+Respond in this exact JSON format and nothing else:
+{
+  "rawText": "<full text content from the image, preserving structure with newlines>",
+  "highlightedText": ["<highlighted/underlined/circled text 1>", "<text 2>", ...],
+  "handwrittenNotes": ["<handwritten note 1>", "<note 2>", ...],
+  "sourceType": "textbook" or "handout" or "notes" or "study_guide" or "other"
+}`,
+          },
+        ],
+      },
+    ],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+  return parseJson<ExtractedContent>(text, {
+    rawText: "Could not read this material. Try a clearer photo.",
+    highlightedText: [],
+    handwrittenNotes: [],
+    sourceType: "other",
+  });
+}
+
+// ── Function 2: Generate study guide + practice quiz from all materials ───────
+
+export async function generateStudyGuide(
+  extractedContents: ExtractedContent[],
+  subjectName: string,
+  testTopics: string | null,
+  testTitle: string
+): Promise<{ content: StudyGuideContent; practiceQuiz: PracticeQuizQuestion[] }> {
+  // Build a combined text summary of all materials
+  const materialsSummary = extractedContents
+    .map((ec, i) => {
+      let section = `--- Material ${i + 1} (${ec.sourceType}) ---\n${ec.rawText}`;
+      if (ec.highlightedText.length > 0) {
+        section += `\n\nHIGHLIGHTED BY STUDENT: ${ec.highlightedText.join("; ")}`;
+      }
+      if (ec.handwrittenNotes.length > 0) {
+        section += `\nSTUDENT'S NOTES: ${ec.handwrittenNotes.join("; ")}`;
+      }
+      return section;
+    })
+    .join("\n\n");
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 4000,
+    messages: [
+      {
+        role: "user",
+        content: `You are creating a study guide for a 6th grader preparing for a ${subjectName} ${testTitle}${testTopics ? ` covering ${testTopics}` : ""}.
+
+Here is ALL the material the student uploaded (OCR text from photos of textbooks, handouts, and notes):
+
+${materialsSummary}
+
+Based on this material, create a comprehensive but 6th-grade-friendly study guide. Pay EXTRA attention to anything the student highlighted or wrote notes about — those are their priority areas.
+
+Also create 8-12 practice quiz questions that test real understanding (not just memorization). Mix multiple choice and free response. Include easy, medium, and hard questions.
+
+Respond in this exact JSON format and nothing else:
+{
+  "content": {
+    "keyConcepts": [
+      {"concept": "<concept name>", "explanation": "<clear, simple explanation a 6th grader can understand>"},
+      ...
+    ],
+    "vocabulary": [
+      {"term": "<term>", "definition": "<simple definition>"},
+      ...
+    ],
+    "importantFacts": ["<fact 1>", "<fact 2>", ...],
+    "highlightedPriorities": ["<things the student highlighted or marked as important>", ...],
+    "summary": "<2-4 paragraph summary of everything the student needs to know, written simply>"
+  },
+  "practiceQuiz": [
+    {
+      "question": "<question text>",
+      "choices": ["A) ...", "B) ...", "C) ...", "D) ..."],
+      "expectedAnswer": "<correct answer — for MC include the letter, for free response write a good answer>",
+      "difficulty": "easy" or "medium" or "hard",
+      "sourceHint": "<where in the material this came from, e.g. 'From the section about photosynthesis'>"
+    },
+    {
+      "question": "<free response question — no choices field>",
+      "expectedAnswer": "<what a good answer includes>",
+      "difficulty": "medium",
+      "sourceHint": "<source hint>"
+    },
+    ...
+  ]
+}`,
+      },
+    ],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+  const result = parseJson<{
+    content: StudyGuideContent;
+    practiceQuiz: PracticeQuizQuestion[];
+  }>(text, {
+    content: {
+      keyConcepts: [],
+      vocabulary: [],
+      importantFacts: [],
+      highlightedPriorities: [],
+      summary: "Could not generate study guide. Try uploading clearer photos.",
+    },
+    practiceQuiz: [],
+  });
+
+  return result;
+}
+
+// ── Function 3: Enhance study session descriptions with real content ──────────
+
+export function enhanceSessionDescriptions(
+  guideContent: StudyGuideContent,
+  sessions: Array<{ id: number; technique: string; description: string | null }>
+): Array<{ id: number; description: string }> {
+  const concepts = guideContent.keyConcepts.map((c) => c.concept);
+  const vocab = guideContent.vocabulary.map((v) => v.term);
+  const facts = guideContent.importantFacts;
+  const highlighted = guideContent.highlightedPriorities;
+
+  const conceptList = concepts.slice(0, 5).join(", ") || "the key concepts";
+  const vocabList = vocab.slice(0, 6).join(", ") || "vocabulary terms";
+  const factList = facts.slice(0, 4).join("; ") || "important facts";
+  const highlightList = highlighted.slice(0, 4).join("; ");
+
+  return sessions.map((s) => {
+    let desc: string;
+
+    switch (s.technique) {
+      case "review":
+        desc = `Read through your study guide in the app. Focus on these key concepts: ${conceptList}. Make sure you understand these vocabulary terms: ${vocabList}.`;
+        if (highlightList) desc += ` You highlighted these as important: ${highlightList}.`;
+        break;
+
+      case "active_recall":
+        desc = `Close everything — no peeking! Write down everything you remember about: ${conceptList}. Then open your study guide and check what you missed. Key vocabulary to recall: ${vocabList}. Facts to remember: ${factList}.`;
+        break;
+
+      case "practice_test":
+        desc = `Take the Practice Quiz in the app. Try to answer every question without looking at your study guide first. After you finish, review any questions you got wrong.`;
+        break;
+
+      case "spaced_review":
+        desc = `Focus on what you found tricky. Review these concepts one more time: ${conceptList}. Quiz yourself on: ${vocabList}.`;
+        if (highlightList) desc += ` Don't forget the items you highlighted: ${highlightList}.`;
+        break;
+
+      case "elaboration":
+        desc = `For each of these concepts, explain WHY it works in your own words: ${conceptList}. Try to connect them to each other. How does ${vocab[0] || "the first term"} relate to ${vocab[1] || "the second term"}?`;
+        break;
+
+      case "interleaving":
+        desc = `Mix it up! Don't study one topic at a time. Jump between different concepts: ${conceptList}. Try answering practice quiz questions from different sections back-to-back.`;
+        break;
+
+      default:
+        desc = s.description || `Study the material using your study guide.`;
+    }
+
+    return { id: s.id, description: desc };
+  });
+}
+
+// ── Function 4: Batch-evaluate practice quiz answers ──────────────────────────
+
+export async function evaluatePracticeQuizAnswers(
+  questions: PracticeQuizQuestion[],
+  studentAnswers: string[],
+  subjectName: string
+): Promise<
+  Array<{
+    questionIndex: number;
+    correct: boolean;
+    feedback: string;
+    score: number;
+  }>
+> {
+  const results: Array<{
+    questionIndex: number;
+    correct: boolean;
+    feedback: string;
+    score: number;
+  }> = [];
+
+  // Separate MC (grade locally) from free response (batch AI eval)
+  const freeResponseIndices: number[] = [];
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const answer = (studentAnswers[i] || "").trim();
+
+    if (q.choices && q.choices.length > 0) {
+      // Multiple choice — grade locally
+      const normalizedAnswer = answer.toLowerCase().replace(/[^a-z]/g, "");
+      const normalizedExpected = q.expectedAnswer.toLowerCase().replace(/[^a-z]/g, "");
+      // Check if the answer starts with the expected letter
+      const correct =
+        normalizedAnswer.charAt(0) === normalizedExpected.charAt(0) ||
+        normalizedAnswer === normalizedExpected;
+
+      results.push({
+        questionIndex: i,
+        correct,
+        feedback: correct
+          ? "Correct!"
+          : `The correct answer is ${q.expectedAnswer}.`,
+        score: correct ? 100 : 0,
+      });
+    } else {
+      // Free response — collect for batch AI evaluation
+      freeResponseIndices.push(i);
+      // Placeholder — will be replaced
+      results.push({
+        questionIndex: i,
+        correct: false,
+        feedback: "",
+        score: 0,
+      });
+    }
+  }
+
+  // Batch evaluate free response answers in a single AI call
+  if (freeResponseIndices.length > 0) {
+    const qaPairs = freeResponseIndices
+      .map((idx) => {
+        const q = questions[idx];
+        const a = (studentAnswers[idx] || "").trim();
+        return `Q${idx + 1}: ${q.question}\nExpected: ${q.expectedAnswer}\nStudent answered: ${a || "(no answer)"}`;
+      })
+      .join("\n\n");
+
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1500,
+      messages: [
+        {
+          role: "user",
+          content: `You are grading a 6th grader's practice quiz answers for ${subjectName}. Evaluate each answer. Be encouraging but honest. Give partial credit for partial understanding.
+
+${qaPairs}
+
+Respond in this exact JSON format and nothing else (an array with one object per question):
+[
+  {
+    "questionNumber": <the Q number>,
+    "correct": <true if mostly correct>,
+    "feedback": "<brief encouraging feedback>",
+    "score": <0-100>
+  },
+  ...
+]`,
+        },
+      ],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    const evals = parseJson<
+      Array<{
+        questionNumber: number;
+        correct: boolean;
+        feedback: string;
+        score: number;
+      }>
+    >(text, []);
+
+    // Map evaluations back to results
+    for (const ev of evals) {
+      // questionNumber is 1-based, convert to index
+      const idx = ev.questionNumber - 1;
+      if (idx >= 0 && idx < results.length && freeResponseIndices.includes(idx)) {
+        results[idx] = {
+          questionIndex: idx,
+          correct: ev.correct,
+          feedback: ev.feedback,
+          score: ev.score,
+        };
+      }
+    }
+
+    // Fill in any free response that wasn't evaluated
+    for (const idx of freeResponseIndices) {
+      if (!results[idx].feedback) {
+        const answer = (studentAnswers[idx] || "").trim();
+        results[idx] = {
+          questionIndex: idx,
+          correct: false,
+          feedback: answer ? "Could not evaluate this answer." : "No answer provided.",
+          score: 0,
+        };
+      }
+    }
+  }
+
+  return results;
+}

@@ -182,6 +182,71 @@ export const studySessions = pgTable(
   (table) => [index("idx_sessions_date").on(table.sessionDate)]
 );
 
+// ── Study Materials (photos of textbooks, handouts, etc.) ─────────────────────
+
+export const studyMaterials = pgTable(
+  "study_materials",
+  {
+    id: serial("id").primaryKey(),
+    testId: integer("test_id")
+      .references(() => tests.id)
+      .notNull(),
+    photoPath: text("photo_path").notNull(),
+    uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+    extractedContent: json("extracted_content").$type<{
+      rawText: string;
+      highlightedText: string[];
+      handwrittenNotes: string[];
+      sourceType: "textbook" | "handout" | "notes" | "study_guide" | "other";
+    }>(),
+  },
+  (table) => [index("idx_materials_test").on(table.testId)]
+);
+
+// ── Study Guides (AI-generated from materials) ───────────────────────────────
+
+export const studyGuides = pgTable("study_guides", {
+  id: serial("id").primaryKey(),
+  testId: integer("test_id")
+    .references(() => tests.id)
+    .notNull(),
+  content: json("content")
+    .$type<{
+      keyConcepts: Array<{ concept: string; explanation: string }>;
+      vocabulary: Array<{ term: string; definition: string }>;
+      importantFacts: string[];
+      highlightedPriorities: string[];
+      summary: string;
+    }>()
+    .notNull(),
+  practiceQuiz: json("practice_quiz")
+    .$type<
+      Array<{
+        question: string;
+        choices?: string[];
+        expectedAnswer: string;
+        difficulty: "easy" | "medium" | "hard";
+        sourceHint: string;
+      }>
+    >()
+    .notNull(),
+  quizAttempts: json("quiz_attempts").$type<
+    Array<{
+      attemptDate: string;
+      answers: Array<{
+        questionIndex: number;
+        studentAnswer: string;
+        correct: boolean;
+        feedback: string;
+        score: number;
+      }>;
+      overallScore: number;
+    }>
+  >(),
+  materialCount: integer("material_count").notNull(),
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+});
+
 // ── Daily Notes ────────────────────────────────────────────────────────────────
 
 export const dailyNotes = pgTable(

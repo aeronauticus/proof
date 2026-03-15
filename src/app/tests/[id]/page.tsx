@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 
@@ -41,26 +41,79 @@ interface StudySession {
   completed: boolean;
 }
 
+interface StudyMaterial {
+  id: number;
+  testId: number;
+  photoPath: string;
+  uploadedAt: string;
+  extractedContent: {
+    rawText: string;
+    highlightedText: string[];
+    handwrittenNotes: string[];
+    sourceType: string;
+  } | null;
+}
+
+interface StudyGuideContent {
+  keyConcepts: Array<{ concept: string; explanation: string }>;
+  vocabulary: Array<{ term: string; definition: string }>;
+  importantFacts: string[];
+  highlightedPriorities: string[];
+  summary: string;
+}
+
+interface PracticeQuizQuestion {
+  question: string;
+  choices?: string[];
+  expectedAnswer: string;
+  difficulty: "easy" | "medium" | "hard";
+  sourceHint: string;
+}
+
+interface QuizAttempt {
+  attemptDate: string;
+  answers: Array<{
+    questionIndex: number;
+    studentAnswer: string;
+    correct: boolean;
+    feedback: string;
+    score: number;
+  }>;
+  overallScore: number;
+}
+
+interface StudyGuide {
+  id: number;
+  testId: number;
+  content: StudyGuideContent;
+  practiceQuiz: PracticeQuizQuestion[];
+  quizAttempts: QuizAttempt[] | null;
+  materialCount: number;
+  generatedAt: string;
+}
+
 function TestDetailContent() {
   const params = useParams();
   const router = useRouter();
   const session = useSession();
   const [test, setTest] = useState<Test | null>(null);
   const [studySessions, setStudySessions] = useState<StudySession[]>([]);
+  const [materials, setMaterials] = useState<StudyMaterial[]>([]);
+  const [studyGuide, setStudyGuide] = useState<StudyGuide | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadingMaterial, setUploadingMaterial] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
   const [correctionRaw, setCorrectionRaw] = useState("");
   const [correctionTotal, setCorrectionTotal] = useState("");
   const [correctionGrade, setCorrectionGrade] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
   const [reviewNotes, setReviewNotes] = useState("");
+  const [showGuide, setShowGuide] = useState(false);
+  const [showQuiz, setShowQuiz] = useState(false);
+  const materialFileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    loadTest();
-  }, [params.id]);
-
-  async function loadTest() {
+  const loadTest = useCallback(async () => {
     const res = await fetch(`/api/tests`);
     const data = await res.json();
     const found = (data.tests || []).find(
@@ -77,8 +130,22 @@ function TestDetailContent() {
       setStudySessions(sessionsData.sessions || []);
     }
 
+    // Load materials + study guide
+    const materialsRes = await fetch(
+      `/api/tests/${params.id}/materials`
+    );
+    if (materialsRes.ok) {
+      const materialsData = await materialsRes.json();
+      setMaterials(materialsData.materials || []);
+      setStudyGuide(materialsData.studyGuide || null);
+    }
+
     setLoading(false);
-  }
+  }, [params.id]);
+
+  useEffect(() => {
+    loadTest();
+  }, [loadTest]);
 
   async function handleTake() {
     await fetch("/api/tests", {
@@ -97,13 +164,41 @@ function TestDetailContent() {
     const formData = new FormData();
     formData.append("photo", file);
 
-    const res = await fetch(`/api/tests/${test!.id}/photo`, {
+    await fetch(`/api/tests/${test!.id}/photo`, {
       method: "POST",
       body: formData,
     });
 
-    const data = await res.json();
     setUploading(false);
+    loadTest();
+  }
+
+  async function handleMaterialUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingMaterial(true);
+
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append("photos", files[i]);
+    }
+
+    await fetch(`/api/tests/${test!.id}/materials`, {
+      method: "POST",
+      body: formData,
+    });
+
+    setUploadingMaterial(false);
+    if (materialFileRef.current) materialFileRef.current.value = "";
+    loadTest();
+  }
+
+  async function handleDeleteMaterial(materialId: number) {
+    await fetch(`/api/tests/${test!.id}/materials`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ materialId }),
+    });
     loadTest();
   }
 
@@ -175,6 +270,10 @@ function TestDetailContent() {
     interleaving: "Mixed Practice",
   };
 
+  const lastAttempt = studyGuide?.quizAttempts?.length
+    ? studyGuide.quizAttempts[studyGuide.quizAttempts.length - 1]
+    : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -221,16 +320,229 @@ function TestDetailContent() {
         )}
       </div>
 
-      {/* Status-specific actions */}
-
-      {/* UPCOMING: Show study plan + "Mark as Taken" */}
+      {/* UPCOMING: Study materials, guide, quiz, study plan, "Mark as Taken" */}
       {test.status === "upcoming" && (
         <>
+          {/* Study Materials Upload */}
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-800">
+                Study Materials
+                {materials.length > 0 && (
+                  <span className="ml-2 text-xs font-normal px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                    {materials.length} photo{materials.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </h3>
+            </div>
+
+            {materials.length === 0 && !uploadingMaterial && (
+              <p className="text-sm text-gray-500 mb-3">
+                Upload photos of your textbook pages, handouts, or notes. The AI will create a study guide for you.
+              </p>
+            )}
+
+            {/* Material thumbnails */}
+            {materials.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+                {materials.map((m) => (
+                  <div key={m.id} className="relative flex-shrink-0">
+                    <img
+                      src={m.photoPath}
+                      alt="Study material"
+                      className="h-20 w-20 object-cover rounded-lg border border-gray-200"
+                    />
+                    <button
+                      onClick={() => handleDeleteMaterial(m.id)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+                    >
+                      &times;
+                    </button>
+                    {m.extractedContent && (
+                      <span className="absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 bg-black/60 text-white rounded">
+                        {m.extractedContent.sourceType}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Upload button */}
+            <input
+              ref={materialFileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              className="hidden"
+              onChange={handleMaterialUpload}
+              disabled={uploadingMaterial}
+            />
+            <button
+              onClick={() => materialFileRef.current?.click()}
+              disabled={uploadingMaterial}
+              className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-colors disabled:opacity-50"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              {uploadingMaterial
+                ? "Analyzing your materials..."
+                : materials.length > 0
+                  ? "Add More Materials"
+                  : "Upload Study Materials"}
+            </button>
+          </div>
+
+          {/* Study Guide */}
+          {studyGuide && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button
+                onClick={() => setShowGuide(!showGuide)}
+                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📖</span>
+                  <h3 className="font-semibold text-gray-800">Your Study Guide</h3>
+                </div>
+                <svg
+                  className={`w-5 h-5 text-gray-400 transition-transform ${showGuide ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showGuide && (
+                <div className="px-4 pb-4 space-y-4">
+                  {/* Summary */}
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-1">Summary</h4>
+                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                      {studyGuide.content.summary}
+                    </p>
+                  </div>
+
+                  {/* Key Concepts */}
+                  {studyGuide.content.keyConcepts.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">Key Concepts</h4>
+                      <div className="space-y-2">
+                        {studyGuide.content.keyConcepts.map((kc, i) => (
+                          <div key={i} className="bg-blue-50 rounded-lg p-3">
+                            <div className="text-sm font-semibold text-blue-900">{kc.concept}</div>
+                            <div className="text-sm text-blue-800 mt-0.5">{kc.explanation}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vocabulary */}
+                  {studyGuide.content.vocabulary.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">Vocabulary</h4>
+                      <div className="grid gap-1.5">
+                        {studyGuide.content.vocabulary.map((v, i) => (
+                          <div key={i} className="flex gap-2 text-sm">
+                            <span className="font-semibold text-gray-800 min-w-0">{v.term}:</span>
+                            <span className="text-gray-600">{v.definition}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Important Facts */}
+                  {studyGuide.content.importantFacts.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">Important Facts</h4>
+                      <ul className="space-y-1">
+                        {studyGuide.content.importantFacts.map((f, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex gap-2">
+                            <span className="text-blue-500 flex-shrink-0">•</span>
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Highlighted Priorities */}
+                  {studyGuide.content.highlightedPriorities.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
+                        You Highlighted These
+                      </h4>
+                      <div className="space-y-1">
+                        {studyGuide.content.highlightedPriorities.map((h, i) => (
+                          <div
+                            key={i}
+                            className="text-sm text-amber-900 bg-yellow-100 rounded px-2.5 py-1.5"
+                          >
+                            {h}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Practice Quiz Button */}
+          {studyGuide && studyGuide.practiceQuiz.length > 0 && !showQuiz && (
+            <button
+              onClick={() => setShowQuiz(true)}
+              className="w-full bg-purple-600 text-white rounded-xl p-4 hover:bg-purple-700 transition-colors text-left"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">
+                    Practice Quiz ({studyGuide.practiceQuiz.length} questions)
+                  </div>
+                  {lastAttempt && (
+                    <div className="text-purple-200 text-sm mt-0.5">
+                      Last score: {lastAttempt.overallScore}%
+                      {studyGuide.quizAttempts && studyGuide.quizAttempts.length > 1 && (
+                        <span> · {studyGuide.quizAttempts.length} attempts</span>
+                      )}
+                    </div>
+                  )}
+                  {!lastAttempt && (
+                    <div className="text-purple-200 text-sm mt-0.5">
+                      Test yourself on the material
+                    </div>
+                  )}
+                </div>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </div>
+            </button>
+          )}
+
+          {/* Practice Quiz UI */}
+          {showQuiz && studyGuide && (
+            <PracticeQuiz
+              testId={test.id}
+              questions={studyGuide.practiceQuiz}
+              onClose={() => { setShowQuiz(false); loadTest(); }}
+            />
+          )}
+
+          {/* Study Plan */}
           {studySessions.length > 0 && (
             <div className="bg-white rounded-xl p-4 border border-gray-200">
               <h3 className="font-semibold text-gray-800 mb-3">Study Plan</h3>
               <div className="space-y-3">
-                {studySessions.map((s, i) => (
+                {studySessions.map((s) => (
                   <div
                     key={s.id}
                     className={`p-3 rounded-lg border ${
@@ -251,6 +563,15 @@ function TestDetailContent() {
                     <div className="text-sm font-medium text-gray-800">{s.title}</div>
                     {s.description && (
                       <div className="text-sm text-gray-600 mt-1">{s.description}</div>
+                    )}
+                    {/* Link to quiz for practice_test sessions */}
+                    {s.technique === "practice_test" && studyGuide && !s.completed && (
+                      <button
+                        onClick={() => setShowQuiz(true)}
+                        className="mt-2 text-xs text-purple-600 font-medium hover:text-purple-700"
+                      >
+                        Start Practice Quiz →
+                      </button>
                     )}
                   </div>
                 ))}
@@ -474,6 +795,284 @@ function TestDetailContent() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── Practice Quiz Component ─────────────────────────────────────────────────
+
+function PracticeQuiz({
+  testId,
+  questions,
+  onClose,
+}: {
+  testId: number;
+  questions: PracticeQuizQuestion[];
+  onClose: () => void;
+}) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<string[]>(new Array(questions.length).fill(""));
+  const [checkedIndex, setCheckedIndex] = useState(-1);
+  const [feedback, setFeedback] = useState<{ correct: boolean; feedback: string; score: number } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [results, setResults] = useState<Array<{
+    questionIndex: number;
+    correct: boolean;
+    feedback: string;
+    score: number;
+  }> | null>(null);
+  const [overallScore, setOverallScore] = useState(0);
+
+  const q = questions[currentIndex];
+  const isLast = currentIndex === questions.length - 1;
+  const isMC = q?.choices && q.choices.length > 0;
+  const progress = Math.round(((checkedIndex + 1) / questions.length) * 100);
+
+  async function handleCheckAnswer() {
+    const answer = answers[currentIndex];
+    if (!answer.trim()) return;
+
+    if (isMC) {
+      // Grade locally for MC
+      const normalizedAnswer = answer.toLowerCase().replace(/[^a-z]/g, "");
+      const normalizedExpected = q.expectedAnswer.toLowerCase().replace(/[^a-z]/g, "");
+      const correct = normalizedAnswer.charAt(0) === normalizedExpected.charAt(0);
+      setFeedback({
+        correct,
+        feedback: correct ? "Correct!" : `The correct answer is ${q.expectedAnswer}.`,
+        score: correct ? 100 : 0,
+      });
+    } else {
+      // For free response, just show a placeholder — full evaluation happens at submit
+      setFeedback({
+        correct: true,
+        feedback: "Answer recorded. You'll see your full score when you finish the quiz.",
+        score: 0,
+      });
+    }
+    setCheckedIndex(currentIndex);
+  }
+
+  function handleNext() {
+    setFeedback(null);
+    if (isLast) {
+      handleSubmitQuiz();
+    } else {
+      setCurrentIndex(currentIndex + 1);
+    }
+  }
+
+  async function handleSubmitQuiz() {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/tests/${testId}/practice-quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setResults(data.results);
+        setOverallScore(data.overallScore);
+      }
+    } catch (err) {
+      console.error("Quiz submission failed:", err);
+    }
+    setSubmitting(false);
+  }
+
+  // Results view
+  if (results) {
+    const correctCount = results.filter((r) => r.correct).length;
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-gray-800">Quiz Results</h3>
+            <button onClick={onClose} className="text-sm text-gray-400 hover:text-gray-600">Done</button>
+          </div>
+        </div>
+
+        {/* Score summary */}
+        <div className="p-6 text-center border-b border-gray-100">
+          <div className={`text-5xl font-bold ${overallScore >= 80 ? "text-green-600" : overallScore >= 60 ? "text-amber-600" : "text-red-600"}`}>
+            {overallScore}%
+          </div>
+          <div className="text-gray-500 mt-1">
+            {correctCount} of {questions.length} correct
+          </div>
+          {overallScore >= 80 && (
+            <p className="text-green-600 text-sm font-medium mt-2">Great job! You know this material well.</p>
+          )}
+          {overallScore >= 60 && overallScore < 80 && (
+            <p className="text-amber-600 text-sm font-medium mt-2">Getting there! Review the ones you missed.</p>
+          )}
+          {overallScore < 60 && (
+            <p className="text-red-600 text-sm font-medium mt-2">Keep studying! Check the hints below to focus your review.</p>
+          )}
+        </div>
+
+        {/* Question-by-question results */}
+        <div className="divide-y divide-gray-100">
+          {results.map((r, i) => (
+            <div key={i} className={`p-3 ${r.correct ? "bg-green-50/50" : "bg-red-50/50"}`}>
+              <div className="flex items-start gap-2">
+                <span className={`flex-shrink-0 text-sm ${r.correct ? "text-green-600" : "text-red-600"}`}>
+                  {r.correct ? "✓" : "✗"}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-800">{questions[i].question}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Your answer: {answers[i] || "(blank)"}
+                  </div>
+                  {!r.correct && (
+                    <>
+                      <div className="text-xs text-green-700 mt-0.5">
+                        Correct: {questions[i].expectedAnswer}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5 italic">
+                        Hint: {questions[i].sourceHint}
+                      </div>
+                    </>
+                  )}
+                  {r.feedback && r.feedback !== "Correct!" && r.feedback !== `The correct answer is ${questions[i].expectedAnswer}.` && (
+                    <div className="text-xs text-gray-600 mt-0.5">{r.feedback}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4">
+          <button
+            onClick={onClose}
+            className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Quiz in progress
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-100">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-600">
+            Question {currentIndex + 1} of {questions.length}
+          </span>
+          <button onClick={onClose} className="text-sm text-gray-400 hover:text-gray-600">
+            Exit Quiz
+          </button>
+        </div>
+        <div className="bg-gray-200 rounded-full h-1.5">
+          <div
+            className="h-1.5 rounded-full bg-purple-500 transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Question */}
+      <div className="p-4 space-y-4">
+        <div className="flex items-start gap-2">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+            q.difficulty === "easy"
+              ? "bg-green-100 text-green-700"
+              : q.difficulty === "medium"
+                ? "bg-amber-100 text-amber-700"
+                : "bg-red-100 text-red-700"
+          }`}>
+            {q.difficulty}
+          </span>
+        </div>
+
+        <p className="text-gray-800 font-medium">{q.question}</p>
+
+        {/* Multiple choice options */}
+        {isMC && q.choices && (
+          <div className="space-y-2">
+            {q.choices.map((choice, i) => {
+              const letter = choice.charAt(0).toLowerCase();
+              const selected = answers[currentIndex].toLowerCase().startsWith(letter);
+              return (
+                <button
+                  key={i}
+                  onClick={() => {
+                    if (feedback) return;
+                    const updated = [...answers];
+                    updated[currentIndex] = choice.charAt(0);
+                    setAnswers(updated);
+                  }}
+                  disabled={!!feedback}
+                  className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${
+                    selected
+                      ? feedback
+                        ? feedback.correct
+                          ? "border-green-500 bg-green-50"
+                          : "border-red-500 bg-red-50"
+                        : "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-300"
+                  } ${feedback ? "cursor-default" : ""}`}
+                >
+                  {choice}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Free response */}
+        {!isMC && (
+          <textarea
+            value={answers[currentIndex]}
+            onChange={(e) => {
+              if (feedback) return;
+              const updated = [...answers];
+              updated[currentIndex] = e.target.value;
+              setAnswers(updated);
+            }}
+            disabled={!!feedback}
+            rows={3}
+            placeholder="Type your answer..."
+            className="w-full p-3 border border-gray-200 rounded-lg text-sm text-gray-800 resize-none focus:outline-none focus:border-purple-400"
+          />
+        )}
+
+        {/* Feedback */}
+        {feedback && (
+          <div className={`p-3 rounded-lg ${
+            feedback.correct ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"
+          }`}>
+            <p className={`text-sm font-medium ${feedback.correct ? "text-green-800" : "text-red-800"}`}>
+              {feedback.feedback}
+            </p>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        {!feedback ? (
+          <button
+            onClick={handleCheckAnswer}
+            disabled={!answers[currentIndex].trim()}
+            className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700 disabled:opacity-50"
+          >
+            Check Answer
+          </button>
+        ) : (
+          <button
+            onClick={handleNext}
+            disabled={submitting}
+            className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700 disabled:opacity-50"
+          >
+            {submitting ? "Scoring..." : isLast ? "See Results" : "Next Question"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

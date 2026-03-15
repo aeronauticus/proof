@@ -95,8 +95,12 @@ interface Assignment {
   subjectName: string;
   subjectColor: string;
   title: string;
+  description: string | null;
   dueDate: string;
   status: string;
+  photoPaths: string[] | null;
+  aiHomeworkEval: AiHomeworkEval | null;
+  studentConfirmedComplete: boolean;
 }
 
 interface Test {
@@ -172,22 +176,294 @@ function PhotoThumbnails({
   );
 }
 
+/** Per-assignment homework upload flow within the Homework checklist item */
+function HomeworkSection({
+  assignments,
+  checklistItemId,
+  onReload,
+}: {
+  assignments: Assignment[];
+  checklistItemId: number;
+  onReload: () => void;
+}) {
+  const [activeAssignment, setActiveAssignment] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState<number | null>(null);
+  const [aiWarnings, setAiWarnings] = useState<Record<number, AiHomeworkEval>>({});
+  const fileRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
+  const today = new Date().toISOString().split("T")[0];
+
+  async function handleAddPhoto(assignmentId: number, file: File) {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("id", assignmentId.toString());
+    formData.append("action", "add_photos");
+    formData.append("photos", file);
+    await fetch("/api/assignments", { method: "PATCH", body: formData });
+    setUploading(false);
+    onReload();
+  }
+
+  async function handleSubmit(assignmentId: number) {
+    setSubmitting(assignmentId);
+    const res = await fetch("/api/assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignmentId, action: "complete" }),
+    });
+    const data = await res.json();
+    setSubmitting(null);
+
+    if (data.needsConfirmation) {
+      setAiWarnings((prev) => ({ ...prev, [assignmentId]: data.aiHomeworkEval }));
+    }
+    onReload();
+
+    // Check if all assignments are now complete → auto-complete checklist item
+    const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+    const updatedData = await updatedRes.json();
+    const stillPending = (updatedData.assignments || []).length;
+    if (stillPending === 0) {
+      await fetch("/api/checklist", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: checklistItemId, action: "complete" }),
+      });
+      onReload();
+    }
+  }
+
+  async function handleConfirm(assignmentId: number) {
+    await fetch("/api/assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignmentId, action: "confirm_complete" }),
+    });
+    setAiWarnings((prev) => {
+      const next = { ...prev };
+      delete next[assignmentId];
+      return next;
+    });
+    onReload();
+
+    // Check if all done
+    const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+    const updatedData = await updatedRes.json();
+    if ((updatedData.assignments || []).length === 0) {
+      await fetch("/api/checklist", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: checklistItemId, action: "complete" }),
+      });
+      onReload();
+    }
+  }
+
+  if (assignments.length === 0) {
+    return (
+      <div className="ml-8 space-y-2">
+        <p className="text-xs text-gray-500">No pending assignments due today.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push("/assignments/new")}
+            className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200"
+          >
+            + Add Assignment
+          </button>
+          <button
+            onClick={async () => {
+              await fetch("/api/checklist", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ itemId: checklistItemId, action: "complete" }),
+              });
+              onReload();
+            }}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+          >
+            No Homework Today
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ml-8 space-y-2">
+      <p className="text-xs text-gray-500 mb-1">
+        Upload photos for each assignment:
+      </p>
+      {assignments.map((a) => {
+        const photos = a.photoPaths || [];
+        const isActive = activeAssignment === a.id;
+        const warning = aiWarnings[a.id] || (
+          a.aiHomeworkEval && (a.aiHomeworkEval.missingAnswers || !a.aiHomeworkEval.appearsComplete || !a.aiHomeworkEval.looksLikeHomework)
+            ? a.aiHomeworkEval
+            : null
+        );
+        const isOverdue = a.dueDate < today;
+
+        return (
+          <div
+            key={a.id}
+            className={`border rounded-lg overflow-hidden ${
+              a.status !== "pending"
+                ? "border-green-200 bg-green-50/50"
+                : warning
+                  ? "border-amber-200 bg-amber-50/30"
+                  : "border-gray-200"
+            }`}
+          >
+            {/* Assignment header */}
+            <button
+              onClick={() => setActiveAssignment(isActive ? null : a.id)}
+              className="w-full px-3 py-2.5 flex items-center gap-2 text-left hover:bg-gray-50/50"
+            >
+              <span
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: a.subjectColor }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-800 leading-snug">{a.title}</div>
+                <div className="text-[11px] text-gray-400">
+                  {a.subjectName}
+                  {isOverdue && <span className="text-red-500 ml-1">(overdue)</span>}
+                </div>
+              </div>
+              {a.status !== "pending" ? (
+                <span className="text-xs text-green-600 font-medium flex-shrink-0">Submitted</span>
+              ) : photos.length > 0 ? (
+                <span className="text-[11px] text-blue-500 flex-shrink-0">{photos.length} photo{photos.length > 1 ? "s" : ""}</span>
+              ) : (
+                <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isActive ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              )}
+            </button>
+
+            {/* Expanded: photo upload area */}
+            {isActive && a.status === "pending" && (
+              <div className="px-3 pb-3 space-y-2 border-t border-gray-100">
+                {a.description && (
+                  <p className="text-xs text-gray-500 mt-2">{a.description}</p>
+                )}
+
+                <PhotoThumbnails photos={photos} size="h-16 w-16" className="mt-2" />
+
+                {/* AI warning */}
+                {warning && (
+                  <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs text-amber-900 font-medium">
+                      {!warning.looksLikeHomework
+                        ? "This doesn't look like homework."
+                        : warning.missingAnswers
+                          ? "Some answers might be missing."
+                          : "This may not be fully complete."}
+                    </p>
+                    <p className="text-xs text-amber-700 mt-0.5">{warning.feedback}</p>
+                  </div>
+                )}
+
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    await handleAddPhoto(a.id, file);
+                    if (fileRef.current) fileRef.current.value = "";
+                  }}
+                />
+
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium disabled:opacity-50 hover:bg-gray-200"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    {uploading ? "..." : photos.length > 0 ? "Add Photo" : "Take Photo"}
+                  </button>
+
+                  {photos.length > 0 && !warning && (
+                    <button
+                      onClick={() => handleSubmit(a.id)}
+                      disabled={submitting === a.id}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {submitting === a.id ? "Checking..." : "Submit"}
+                    </button>
+                  )}
+
+                  {warning && (
+                    <>
+                      <button
+                        onClick={() => handleSubmit(a.id)}
+                        disabled={submitting === a.id}
+                        className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        Resubmit
+                      </button>
+                      <button
+                        onClick={() => handleConfirm(a.id)}
+                        className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700"
+                      >
+                        It&apos;s Done
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Submitted assignment - show photos inline */}
+            {a.status !== "pending" && photos.length > 0 && (
+              <div className="px-3 pb-2 border-t border-green-100">
+                <PhotoThumbnails photos={photos} size="h-12 w-12" className="mt-2" />
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <button
+        onClick={() => router.push("/assignments/new")}
+        className="text-xs text-blue-600 font-medium hover:text-blue-700 mt-1"
+      >
+        + Add another assignment
+      </button>
+    </div>
+  );
+}
+
 function ChecklistRow({
   item,
   hasPlannerPhoto,
+  homeworkAssignments,
   onToggle,
   onAddPhoto,
   onCompleteHomework,
   onConfirmComplete,
   onReadingNotes,
+  onReload,
 }: {
   item: ChecklistItem;
   hasPlannerPhoto: boolean;
+  homeworkAssignments: Assignment[];
   onToggle: (id: number) => void;
   onAddPhoto: (id: number, file: File) => Promise<void>;
   onCompleteHomework: (id: number) => Promise<{ needsConfirmation?: boolean; aiHomeworkEval?: AiHomeworkEval } | null>;
   onConfirmComplete: (id: number) => void;
   onReadingNotes: (id: number, notes: string) => void;
+  onReload: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [readingText, setReadingText] = useState("");
@@ -198,12 +474,7 @@ function ChecklistRow({
 
   const isHomework = item.title === "Homework";
   const isReading = item.title === "Reading / Memory Work";
-  const needsProof = isHomework || isReading;
   const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
-
-  // Show AI warning state (photos uploaded but AI flagged issues, not yet completed)
-  const hasPendingAiWarning = isHomework && !item.completed && item.aiHomeworkEval &&
-    (item.aiHomeworkEval.missingAnswers || !item.aiHomeworkEval.appearsComplete || !item.aiHomeworkEval.looksLikeHomework);
 
   // Completed items — show proof if it exists
   if (item.completed) {
@@ -241,142 +512,34 @@ function ChecklistRow({
     );
   }
 
-  // Not completed — handle different item types
-  if (needsProof && !expanded && !hasPendingAiWarning) {
-    return (
-      <button
-        onClick={() => setExpanded(true)}
-        disabled={isBlocked}
-        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-          isBlocked ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50 cursor-pointer active:bg-gray-100"
-        }`}
-      >
-        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
-        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">
-          {isHomework
-            ? (item.photoPaths?.length ? `${item.photoPaths.length} photo${item.photoPaths.length > 1 ? "s" : ""}` : "Photo")
-            : "Write"}
-        </span>
-      </button>
-    );
-  }
-
-  // AI Warning state — show warning and confirm button
-  if (hasPendingAiWarning) {
-    const eval_ = item.aiHomeworkEval!;
-    return (
-      <div className="px-4 py-3 space-y-2 bg-amber-50/50">
-        <div className="flex items-center gap-3">
-          <div className="w-5 h-5 rounded-full border-2 border-amber-400 flex-shrink-0 flex items-center justify-center">
-            <span className="text-amber-500 text-xs font-bold">!</span>
-          </div>
-          <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
-        </div>
-        <div className="ml-8 p-3 bg-amber-100 border border-amber-200 rounded-lg">
-          <p className="text-sm text-amber-900 font-medium mb-1">
-            {!eval_.looksLikeHomework
-              ? "This doesn't look like homework."
-              : eval_.missingAnswers
-                ? "It looks like some answers might be missing."
-                : "The homework may not be fully complete."}
-          </p>
-          <p className="text-xs text-amber-800">{eval_.feedback}</p>
-          <p className="text-xs text-amber-700 mt-1">
-            Estimated completion: {eval_.estimatedCompletionPct}%
-          </p>
-        </div>
-        <PhotoThumbnails photos={item.photoPaths || []} size="h-16 w-16" className="ml-8" />
-        <div className="ml-8 flex gap-2">
-          <button
-            onClick={() => setExpanded(true)}
-            className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
-          >
-            Add More Photos
-          </button>
-          <button
-            onClick={() => {
-              onConfirmComplete(item.id);
-            }}
-            className="px-3 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
-          >
-            I Finished Everything
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (isHomework && expanded) {
-    const photos = item.photoPaths || [];
+  // Homework items — delegate to HomeworkSection
+  if (isHomework && !item.completed) {
     return (
       <div className="px-4 py-3 space-y-2">
         <div className="flex items-center gap-3">
           <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
           <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
-          <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
         </div>
-        <p className="text-xs text-gray-500 ml-8">
-          {photos.length === 0
-            ? "Take a photo of your completed homework."
-            : `${photos.length} photo${photos.length > 1 ? "s" : ""} uploaded. Add more or tap Done.`}
-        </p>
-        {/* Thumbnails of uploaded photos */}
-        <PhotoThumbnails photos={photos} size="h-20 w-20" className="ml-8" />
-        {/* AI warning from a previous attempt */}
-        {aiWarning && (
-          <div className="ml-8 p-2 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-xs text-amber-800 font-medium">{aiWarning.feedback}</p>
-          </div>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            setUploading(true);
-            await onAddPhoto(item.id, file);
-            setUploading(false);
-            if (fileRef.current) fileRef.current.value = "";
-          }}
+        <HomeworkSection
+          assignments={homeworkAssignments}
+          checklistItemId={item.id}
+          onReload={onReload}
         />
-        <div className="ml-8 flex gap-2">
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-gray-200"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            {uploading ? "Uploading..." : photos.length > 0 ? "Add Photo" : "Take Photo"}
-          </button>
-          {photos.length > 0 && (
-            <button
-              onClick={async () => {
-                setSubmitting(true);
-                const result = await onCompleteHomework(item.id);
-                setSubmitting(false);
-                if (result?.needsConfirmation && result.aiHomeworkEval) {
-                  setAiWarning(result.aiHomeworkEval);
-                  // Don't collapse — the parent will re-render with hasPendingAiWarning
-                } else {
-                  setExpanded(false);
-                }
-              }}
-              disabled={submitting}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Checking..." : "Done"}
-            </button>
-          )}
-        </div>
       </div>
+    );
+  }
+
+  // Not completed — handle reading/memory work
+  if (isReading && !expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">Write</span>
+      </button>
     );
   }
 
@@ -618,6 +781,7 @@ function DashboardContent() {
   const [uploading, setUploading] = useState(false);
   const [plannerExtraction, setPlannerExtraction] = useState<PlannerExtraction | null>(null);
   const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
+  const [homeworkAssignments, setHomeworkAssignments] = useState<Assignment[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
   const prevCompletionRef = useRef(0);
 
@@ -625,11 +789,12 @@ function DashboardContent() {
 
   const loadData = useCallback(async () => {
     try {
-      const [checklistRes, scheduleRes, assignmentsRes, testsRes, studyProgressRes] =
+      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes] =
         await Promise.all([
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
           fetch(`/api/assignments?status=pending&from=${today}&to=${today}`),
+          fetch(`/api/assignments?status=pending&to=${today}`), // all pending up to today (for homework)
           fetch(`/api/tests`),
           fetch(`/api/study-progress`),
         ]);
@@ -637,6 +802,7 @@ function DashboardContent() {
       const checklistData = await checklistRes.json();
       const scheduleData = await scheduleRes.json();
       const assignmentsData = await assignmentsRes.json();
+      const homeworkData = await homeworkRes.json();
       const testsData = await testsRes.json();
       const studyProgressData = await studyProgressRes.json();
 
@@ -645,6 +811,7 @@ function DashboardContent() {
       setHasPlannerPhoto(checklistData.hasPlannerPhoto);
       setSchedule(scheduleData.slots || []);
       setAssignmentsDue(assignmentsData.assignments || []);
+      setHomeworkAssignments(homeworkData.assignments || []);
       setStudyProgress(
         (studyProgressData.tests || []).filter(
           (t: StudyProgressTest) =>
@@ -1191,11 +1358,13 @@ function DashboardContent() {
               key={item.id}
               item={item}
               hasPlannerPhoto={hasPlannerPhoto}
+              homeworkAssignments={homeworkAssignments}
               onToggle={handleChecklistToggle}
               onAddPhoto={handleAddPhoto}
               onCompleteHomework={handleCompleteHomework}
               onConfirmComplete={handleConfirmComplete}
               onReadingNotes={handleReadingNotes}
+              onReload={loadData}
             />
           ))}
         </div>
