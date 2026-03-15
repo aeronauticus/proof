@@ -30,6 +30,33 @@ export interface PracticeQuizQuestion {
   sourceHint: string;
 }
 
+export interface PastPerformance {
+  /** Past graded tests/quizzes in this subject with scores */
+  pastTests: Array<{
+    title: string;
+    type: string;
+    scoreRaw: number | null;
+    scoreTotal: number | null;
+    letterGrade: string | null;
+    topics: string | null;
+  }>;
+  /** Wrong answers from past practice quizzes in this subject */
+  wrongAnswers: Array<{
+    testTitle: string;
+    question: string;
+    studentAnswer: string;
+    expectedAnswer: string;
+    feedback: string;
+  }>;
+  /** Wrong answers from daily notes quizzes in this subject */
+  dailyNotesWrong: Array<{
+    date: string;
+    question: string;
+    studentAnswer: string;
+    feedback: string;
+  }>;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function toImageBlock(base64: string, photoPath: string): Anthropic.ImageBlockParam {
@@ -126,7 +153,8 @@ export async function generateStudyGuide(
   extractedContents: ExtractedContent[],
   subjectName: string,
   testTopics: string | null,
-  testTitle: string
+  testTitle: string,
+  pastPerformance?: PastPerformance
 ): Promise<{ content: StudyGuideContent; practiceQuiz: PracticeQuizQuestion[] }> {
   // Build a combined text summary of all materials
   const materialsSummary = extractedContents
@@ -142,6 +170,44 @@ export async function generateStudyGuide(
     })
     .join("\n\n");
 
+  // Build past performance context
+  let performanceContext = "";
+  if (pastPerformance) {
+    const parts: string[] = [];
+
+    if (pastPerformance.pastTests.length > 0) {
+      parts.push("PAST TEST/QUIZ SCORES IN THIS SUBJECT:");
+      for (const t of pastPerformance.pastTests) {
+        const score = t.scoreRaw !== null && t.scoreTotal !== null
+          ? `${t.scoreRaw}/${t.scoreTotal}${t.letterGrade ? ` (${t.letterGrade})` : ""}`
+          : "no score";
+        parts.push(`  - ${t.type}: "${t.title}" — ${score}${t.topics ? ` [topics: ${t.topics}]` : ""}`);
+      }
+    }
+
+    if (pastPerformance.wrongAnswers.length > 0) {
+      parts.push("\nQUESTIONS THE STUDENT GOT WRONG ON PAST PRACTICE QUIZZES:");
+      for (const w of pastPerformance.wrongAnswers.slice(0, 15)) {
+        parts.push(`  - [${w.testTitle}] Q: "${w.question}"`);
+        parts.push(`    Student answered: "${w.studentAnswer}" — Expected: "${w.expectedAnswer}"`);
+        if (w.feedback) parts.push(`    Feedback: ${w.feedback}`);
+      }
+    }
+
+    if (pastPerformance.dailyNotesWrong.length > 0) {
+      parts.push("\nQUESTIONS THE STUDENT GOT WRONG ON DAILY NOTES QUIZZES:");
+      for (const w of pastPerformance.dailyNotesWrong.slice(0, 10)) {
+        parts.push(`  - [${w.date}] Q: "${w.question}"`);
+        parts.push(`    Student answered: "${w.studentAnswer}"`);
+        if (w.feedback) parts.push(`    Feedback: ${w.feedback}`);
+      }
+    }
+
+    if (parts.length > 0) {
+      performanceContext = "\n\n" + parts.join("\n");
+    }
+  }
+
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 4000,
@@ -153,8 +219,14 @@ export async function generateStudyGuide(
 Here is ALL the material the student uploaded (OCR text from photos of textbooks, handouts, and notes):
 
 ${materialsSummary}
+${performanceContext}
 
-Based on this material, create a comprehensive but 6th-grade-friendly study guide. Pay EXTRA attention to anything the student highlighted or wrote notes about — those are their priority areas.
+Based on this material, create a comprehensive but 6th-grade-friendly study guide. Pay EXTRA attention to:
+1. Anything the student highlighted or wrote notes about — those are their priority areas.
+2. **Topics and concepts the student has gotten WRONG on past quizzes and tests.** These are weak areas that need more coverage and clearer explanations. Make sure the study guide addresses these gaps head-on.
+3. If past test scores in this subject were low, emphasize fundamentals.
+
+When creating practice quiz questions, deliberately include MORE questions targeting areas where the student has struggled before. If the student got a question wrong about a specific concept, create a similar question so they can practice it again.
 
 Also create 8-12 practice quiz questions that test real understanding (not just memorization). Mix multiple choice and free response. Include easy, medium, and hard questions.
 

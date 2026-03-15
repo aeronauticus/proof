@@ -92,6 +92,63 @@ interface StudyGuide {
   generatedAt: string;
 }
 
+/** Downsample an image file so AI can still read text but uploads are fast.
+ *  Target: longest edge ≤ 1600px, JPEG quality 0.7 — keeps text legible. */
+async function downsampleImage(file: File): Promise<File> {
+  const MAX_DIM = 1600;
+  const QUALITY = 0.7;
+
+  // Only process images
+  if (!file.type.startsWith("image/")) return file;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+
+      // Skip if already small enough
+      if (width <= MAX_DIM && height <= MAX_DIM) {
+        resolve(file);
+        return;
+      }
+
+      // Scale down keeping aspect ratio
+      if (width > height) {
+        height = Math.round(height * (MAX_DIM / width));
+        width = MAX_DIM;
+      } else {
+        width = Math.round(width * (MAX_DIM / height));
+        height = MAX_DIM;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            const name = file.name.replace(/\.\w+$/, ".jpg");
+            resolve(new File([blob], name, { type: "image/jpeg" }));
+          } else {
+            resolve(file);
+          }
+        },
+        "image/jpeg",
+        QUALITY
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
 function TestDetailContent() {
   const params = useParams();
   const router = useRouter();
@@ -111,6 +168,8 @@ function TestDetailContent() {
   const [reviewNotes, setReviewNotes] = useState("");
   const [showGuide, setShowGuide] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
+  const [generatingGuide, setGeneratingGuide] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -178,19 +237,46 @@ function TestDetailContent() {
     if (!files || files.length === 0) return;
     setUploadingMaterial(true);
 
-    const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append("photos", files[i]);
+    const total = files.length;
+    setUploadProgress({ done: 0, total });
+
+    // Process in batches of 3 to avoid overwhelming the server
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+      const batch = Array.from(files).slice(i, i + BATCH_SIZE);
+      const promises = batch.map(async (file) => {
+        const downsampled = await downsampleImage(file);
+        const formData = new FormData();
+        formData.append("photos", downsampled);
+        return fetch(`/api/tests/${test!.id}/materials`, {
+          method: "POST",
+          body: formData,
+        });
+      });
+      await Promise.all(promises);
+      setUploadProgress({ done: Math.min(i + BATCH_SIZE, total), total });
     }
 
-    await fetch(`/api/tests/${test!.id}/materials`, {
-      method: "POST",
-      body: formData,
-    });
-
     setUploadingMaterial(false);
+    setUploadProgress(null);
     if (materialFileRef.current) materialFileRef.current.value = "";
     loadTest();
+  }
+
+  async function handleGenerateGuide() {
+    setGeneratingGuide(true);
+    try {
+      const res = await fetch(`/api/tests/${test!.id}/materials`, {
+        method: "PATCH",
+      });
+      if (res.ok) {
+        await loadTest();
+        setShowGuide(true);
+      }
+    } catch (err) {
+      console.error("Guide generation failed:", err);
+    }
+    setGeneratingGuide(false);
   }
 
   async function handleDeleteMaterial(materialId: number) {
@@ -381,19 +467,36 @@ function TestDetailContent() {
             />
             <button
               onClick={() => materialFileRef.current?.click()}
-              disabled={uploadingMaterial}
+              disabled={uploadingMaterial || generatingGuide}
               className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-colors disabled:opacity-50"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              {uploadingMaterial
-                ? "Analyzing your materials..."
-                : materials.length > 0
-                  ? "Add More Materials"
-                  : "Upload Study Materials"}
+              {uploadingMaterial && uploadProgress
+                ? `Reading photos... ${uploadProgress.done}/${uploadProgress.total}`
+                : uploadingMaterial
+                  ? "Reading your materials..."
+                  : materials.length > 0
+                    ? "Add More Photos"
+                    : "Upload Study Materials"}
             </button>
+
+            {/* Done uploading → generate study guide */}
+            {materials.length > 0 && !uploadingMaterial && (
+              <button
+                onClick={handleGenerateGuide}
+                disabled={generatingGuide}
+                className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-70 transition-colors"
+              >
+                {generatingGuide
+                  ? "Creating your study guide & practice quiz..."
+                  : studyGuide
+                    ? "Regenerate Study Guide & Quiz"
+                    : "Done Uploading — Generate Study Guide"}
+              </button>
+            )}
           </div>
 
           {/* Study Guide */}

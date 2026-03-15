@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tests, studyMaterials, studyGuides, studyPlans, studySessions } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { tests, studyMaterials, studyGuides, studyPlans, studySessions, dailyNotes } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { writeFile, mkdir } from "fs/promises";
@@ -12,6 +12,7 @@ import {
   extractMaterialContent,
   generateStudyGuide,
   enhanceSessionDescriptions,
+  type PastPerformance,
 } from "@/lib/ai/material-analyzer";
 
 type Params = { params: Promise<{ id: string }> };
@@ -40,8 +41,133 @@ async function getGuide(testId: number) {
     .then((rows) => rows[0] || null);
 }
 
+async function gatherPastPerformance(subjectId: number, currentTestId: number): Promise<PastPerformance> {
+  const performance: PastPerformance = {
+    pastTests: [],
+    wrongAnswers: [],
+    dailyNotesWrong: [],
+  };
+
+  // 1. Past graded tests/quizzes in this subject
+  const pastTests = await db
+    .select({
+      title: tests.title,
+      type: tests.type,
+      scoreRaw: tests.scoreRaw,
+      scoreTotal: tests.scoreTotal,
+      letterGrade: tests.letterGrade,
+      topics: tests.topics,
+    })
+    .from(tests)
+    .where(
+      and(
+        eq(tests.subjectId, subjectId),
+        eq(tests.status, "reviewed")
+      )
+    );
+
+  // Also include "returned" tests (graded but not yet reviewed)
+  const returnedTests = await db
+    .select({
+      title: tests.title,
+      type: tests.type,
+      scoreRaw: tests.scoreRaw,
+      scoreTotal: tests.scoreTotal,
+      letterGrade: tests.letterGrade,
+      topics: tests.topics,
+    })
+    .from(tests)
+    .where(
+      and(
+        eq(tests.subjectId, subjectId),
+        eq(tests.status, "returned")
+      )
+    );
+
+  performance.pastTests = [...pastTests, ...returnedTests];
+
+  // 2. Wrong answers from practice quizzes on past tests in this subject
+  const sameSubjectTests = await db
+    .select({ id: tests.id, title: tests.title })
+    .from(tests)
+    .where(eq(tests.subjectId, subjectId));
+
+  for (const t of sameSubjectTests) {
+    if (t.id === currentTestId) continue; // skip current test
+    const guide = await db
+      .select({ practiceQuiz: studyGuides.practiceQuiz, quizAttempts: studyGuides.quizAttempts })
+      .from(studyGuides)
+      .where(eq(studyGuides.testId, t.id))
+      .then((rows) => rows[0] || null);
+
+    if (!guide || !guide.quizAttempts) continue;
+    const attempts = guide.quizAttempts as Array<{
+      answers: Array<{
+        questionIndex: number;
+        studentAnswer: string;
+        correct: boolean;
+        feedback: string;
+      }>;
+    }>;
+    const quiz = guide.practiceQuiz as Array<{
+      question: string;
+      expectedAnswer: string;
+    }>;
+
+    // Get wrong answers from the most recent attempt
+    const lastAttempt = attempts[attempts.length - 1];
+    if (!lastAttempt) continue;
+
+    for (const a of lastAttempt.answers) {
+      if (!a.correct && quiz[a.questionIndex]) {
+        performance.wrongAnswers.push({
+          testTitle: t.title,
+          question: quiz[a.questionIndex].question,
+          studentAnswer: a.studentAnswer,
+          expectedAnswer: quiz[a.questionIndex].expectedAnswer,
+          feedback: a.feedback,
+        });
+      }
+    }
+  }
+
+  // 3. Wrong answers from daily notes quizzes in this subject
+  const notesWithQuizzes = await db
+    .select({
+      date: dailyNotes.date,
+      quizQuestions: dailyNotes.quizQuestions,
+      quizAnswers: dailyNotes.quizAnswers,
+    })
+    .from(dailyNotes)
+    .where(eq(dailyNotes.subjectId, subjectId));
+
+  for (const note of notesWithQuizzes) {
+    if (!note.quizQuestions || !note.quizAnswers) continue;
+    const questions = note.quizQuestions as Array<{ question: string }>;
+    const answers = note.quizAnswers as Array<{
+      answer: string;
+      correct: boolean;
+      feedback: string;
+    }>;
+
+    for (let i = 0; i < answers.length; i++) {
+      if (!answers[i].correct && questions[i]) {
+        performance.dailyNotesWrong.push({
+          date: note.date,
+          question: questions[i].question,
+          studentAnswer: answers[i].answer,
+          feedback: answers[i].feedback,
+        });
+      }
+    }
+  }
+
+  return performance;
+}
+
 async function regenerateGuide(
   testId: number,
+  subjectId: number,
   subjectName: string,
   testTopics: string | null,
   testTitle: string
@@ -57,12 +183,16 @@ async function regenerateGuide(
     return null;
   }
 
-  // Generate study guide from all extracted content
+  // Gather past performance data for this subject
+  const pastPerformance = await gatherPastPerformance(subjectId, testId);
+
+  // Generate study guide from all extracted content + past performance
   const { content, practiceQuiz } = await generateStudyGuide(
     extractedContents,
     subjectName,
     testTopics,
-    testTitle
+    testTitle,
+    pastPerformance
   );
 
   // Upsert study guide
@@ -218,18 +348,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
   }
 
-  // Regenerate study guide from ALL materials
-  let guide = null;
-  try {
-    guide = await regenerateGuide(testId, subjectName, test.topics, test.title);
-  } catch (err) {
-    console.error("Study guide generation failed:", err);
-  }
-
   return NextResponse.json({
     ok: true,
     materials: newMaterials,
-    studyGuide: guide,
   });
 }
 
@@ -267,10 +388,36 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     testId,
   });
 
-  // Get subject for regeneration
+  // If no materials remain, delete the study guide too
+  const remaining = await getMaterials(testId);
+  if (remaining.length === 0) {
+    await db.delete(studyGuides).where(eq(studyGuides.testId, testId));
+  }
+
+  return NextResponse.json({ ok: true, remainingCount: remaining.length });
+}
+
+// PATCH /api/tests/[id]/materials — generate study guide from all uploaded materials
+export async function PATCH(req: NextRequest, { params }: Params) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const testId = parseInt(id);
+
   const test = await getTestById(testId);
   if (!test) {
-    return NextResponse.json({ ok: true, studyGuide: null });
+    return NextResponse.json({ error: "Test not found" }, { status: 404 });
+  }
+
+  const materials = await getMaterials(testId);
+  if (materials.length === 0) {
+    return NextResponse.json(
+      { error: "No materials uploaded yet" },
+      { status: 400 }
+    );
   }
 
   const { subjects } = await import("@/lib/schema");
@@ -279,17 +426,23 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     .from(subjects)
     .where(eq(subjects.id, test.subjectId))
     .then((rows) => rows[0]);
+  const subjectName = subject?.name || "Unknown";
 
   let guide = null;
   try {
     guide = await regenerateGuide(
       testId,
-      subject?.name || "Unknown",
+      test.subjectId,
+      subjectName,
       test.topics,
       test.title
     );
   } catch (err) {
-    console.error("Study guide regeneration failed:", err);
+    console.error("Study guide generation failed:", err);
+    return NextResponse.json(
+      { error: "Failed to generate study guide" },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ ok: true, studyGuide: guide });
