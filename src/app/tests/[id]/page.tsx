@@ -600,7 +600,7 @@ function TestDetailContent() {
           )}
 
           {/* Practice Quiz Button */}
-          {studyGuide && studyGuide.practiceQuiz.length > 0 && !showQuiz && (
+          {studyGuide && studyGuide.practiceQuiz && studyGuide.practiceQuiz.length > 0 && !showQuiz && (
             <button
               onClick={() => setShowQuiz(true)}
               className="w-full bg-purple-600 text-white rounded-xl p-4 hover:bg-purple-700 transition-colors text-left"
@@ -632,7 +632,7 @@ function TestDetailContent() {
           )}
 
           {/* Practice Quiz UI */}
-          {showQuiz && studyGuide && (
+          {showQuiz && studyGuide && studyGuide.practiceQuiz && studyGuide.practiceQuiz.length > 0 && (
             <PracticeQuiz
               testId={test.id}
               questions={studyGuide.practiceQuiz}
@@ -668,7 +668,7 @@ function TestDetailContent() {
                       <div className="text-sm text-gray-600 mt-1">{s.description}</div>
                     )}
                     {/* Link to quiz for practice_test sessions */}
-                    {s.technique === "practice_test" && studyGuide && !s.completed && (
+                    {s.technique === "practice_test" && (studyGuide?.practiceQuiz?.length ?? 0) > 0 && !s.completed && (
                       <button
                         onClick={() => setShowQuiz(true)}
                         className="mt-2 text-xs text-purple-600 font-medium hover:text-purple-700"
@@ -926,10 +926,21 @@ function PracticeQuiz({
   }> | null>(null);
   const [overallScore, setOverallScore] = useState(0);
 
-  const q = questions[currentIndex];
+  const q = questions[currentIndex] || null;
   const isLast = currentIndex === questions.length - 1;
-  const isMC = q?.choices && q.choices.length > 0;
-  const progress = Math.round(((checkedIndex + 1) / questions.length) * 100);
+  const isMC = !!(q?.choices && q.choices.length > 0);
+  const progress = questions.length > 0
+    ? Math.round(((checkedIndex + 1) / questions.length) * 100)
+    : 0;
+
+  if (!q) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+        <p className="text-gray-500">No quiz questions available.</p>
+        <button onClick={onClose} className="mt-3 text-sm text-purple-600 font-medium">Close</button>
+      </div>
+    );
+  }
 
   async function handleCheckAnswer() {
     const answer = answers[currentIndex];
@@ -1017,34 +1028,39 @@ function PracticeQuiz({
 
         {/* Question-by-question results */}
         <div className="divide-y divide-gray-100">
-          {results.map((r, i) => (
-            <div key={i} className={`p-3 ${r.correct ? "bg-green-50/50" : "bg-red-50/50"}`}>
-              <div className="flex items-start gap-2">
-                <span className={`flex-shrink-0 text-sm ${r.correct ? "text-green-600" : "text-red-600"}`}>
-                  {r.correct ? "✓" : "✗"}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-gray-800">{questions[i].question}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    Your answer: {answers[i] || "(blank)"}
+          {results.map((r, i) => {
+            const rq = questions[i];
+            return (
+              <div key={i} className={`p-3 ${r.correct ? "bg-green-50/50" : "bg-red-50/50"}`}>
+                <div className="flex items-start gap-2">
+                  <span className={`flex-shrink-0 text-sm ${r.correct ? "text-green-600" : "text-red-600"}`}>
+                    {r.correct ? "✓" : "✗"}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-gray-800">{rq?.question || `Question ${i + 1}`}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      Your answer: {answers[i] || "(blank)"}
+                    </div>
+                    {!r.correct && rq && (
+                      <>
+                        <div className="text-xs text-green-700 mt-0.5">
+                          Correct: {rq.expectedAnswer}
+                        </div>
+                        {rq.sourceHint && (
+                          <div className="text-xs text-gray-500 mt-0.5 italic">
+                            Hint: {rq.sourceHint}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {r.feedback && r.feedback !== "Correct!" && r.feedback !== `The correct answer is ${rq?.expectedAnswer}.` && (
+                      <div className="text-xs text-gray-600 mt-0.5">{r.feedback}</div>
+                    )}
                   </div>
-                  {!r.correct && (
-                    <>
-                      <div className="text-xs text-green-700 mt-0.5">
-                        Correct: {questions[i].expectedAnswer}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-0.5 italic">
-                        Hint: {questions[i].sourceHint}
-                      </div>
-                    </>
-                  )}
-                  {r.feedback && r.feedback !== "Correct!" && r.feedback !== `The correct answer is ${questions[i].expectedAnswer}.` && (
-                    <div className="text-xs text-gray-600 mt-0.5">{r.feedback}</div>
-                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-4">
@@ -1082,19 +1098,21 @@ function PracticeQuiz({
 
       {/* Question */}
       <div className="p-4 space-y-4">
-        <div className="flex items-start gap-2">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-            q.difficulty === "easy"
-              ? "bg-green-100 text-green-700"
-              : q.difficulty === "medium"
-                ? "bg-amber-100 text-amber-700"
-                : "bg-red-100 text-red-700"
-          }`}>
-            {q.difficulty}
-          </span>
-        </div>
+        {q.difficulty && (
+          <div className="flex items-start gap-2">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+              q.difficulty === "easy"
+                ? "bg-green-100 text-green-700"
+                : q.difficulty === "medium"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-red-100 text-red-700"
+            }`}>
+              {q.difficulty}
+            </span>
+          </div>
+        )}
 
-        <p className="text-gray-800 font-medium">{q.question}</p>
+        <p className="text-gray-800 font-medium">{q.question || "Question"}</p>
 
         {/* Multiple choice options */}
         {isMC && q.choices && (
