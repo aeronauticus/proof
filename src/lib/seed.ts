@@ -15,16 +15,21 @@ async function seed() {
 
   const existingUsers = await db.select().from(users);
   if (existingUsers.length === 0) {
-    const jackPin = await bcrypt.hash("1234", 10);
-    const parentPin = await bcrypt.hash("0000", 10);
+    const jackPin = await bcrypt.hash("2222", 10);
+    const parentPin = await bcrypt.hash("2013", 10);
 
     await db.insert(users).values([
       { name: "Jack", role: "student", pinHash: jackPin },
       { name: "Parent", role: "parent", pinHash: parentPin },
     ]);
-    console.log("  ✓ Users created (Jack PIN: 1234, Parent PIN: 0000)");
+    console.log("  ✓ Users created (Jack PIN: 2222, Parent PIN: 2013)");
   } else {
-    console.log("  - Users already exist, skipping");
+    // Update PINs for existing users
+    const jackPin = await bcrypt.hash("2222", 10);
+    const parentPin = await bcrypt.hash("2013", 10);
+    await db.update(users).set({ pinHash: jackPin }).where(eq(users.name, "Jack"));
+    await db.update(users).set({ pinHash: parentPin }).where(eq(users.name, "Parent"));
+    console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 2013)");
   }
 
   // ── Subjects ───────────────────────────────────────────────────────────────
@@ -107,14 +112,15 @@ async function seed() {
 
   const existingTemplates = await db.select().from(checklistTemplates);
   if (existingTemplates.length === 0) {
-    const allDays = ["mon", "tue", "wed", "thu", "fri"];
+    const schoolDays = ["mon", "tue", "wed", "thu", "fri"];
+    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
     await db.insert(checklistTemplates).values([
       {
         title: "Upload Planner Photo",
         description: "Photograph today's planner page and upload it.",
         orderIndex: 1,
-        applicableDays: allDays,
+        applicableDays: schoolDays,
         requiresParent: true,
         category: "organization",
         isDynamic: false,
@@ -124,7 +130,7 @@ async function seed() {
         description:
           "Bring home binders, organize papers (front = current, back = completed), write all assignments clearly in planner. Show planner and binders to parent.",
         orderIndex: 2,
-        applicableDays: allDays,
+        applicableDays: schoolDays,
         requiresParent: true,
         category: "organization",
         isDynamic: false,
@@ -134,7 +140,7 @@ async function seed() {
         description:
           "Complete all assigned homework. Write answers in complete sentences. Add explanation or detail where needed. Double-check work before stopping. Show completed homework to parent.",
         orderIndex: 3,
-        applicableDays: allDays,
+        applicableDays: everyDay,
         requiresParent: true,
         category: "homework",
         isDynamic: false,
@@ -144,7 +150,7 @@ async function seed() {
         description:
           "Upload notes photo. AI will evaluate your summary and quiz you on the material. Review notes carefully before answering quiz questions.",
         orderIndex: 4,
-        applicableDays: allDays,
+        applicableDays: schoolDays,
         requiresParent: false,
         category: "study",
         isDynamic: true,
@@ -154,7 +160,7 @@ async function seed() {
         description:
           "Work on assigned reading or memory work. Perform reading or memory work aloud to a parent.",
         orderIndex: 5,
-        applicableDays: allDays,
+        applicableDays: everyDay,
         requiresParent: true,
         category: "study",
         isDynamic: false,
@@ -164,7 +170,7 @@ async function seed() {
         description:
           "Know what you need to do tomorrow. Make sure binders are ready for school. Show final completed homework and planner to a parent.",
         orderIndex: 6,
-        applicableDays: allDays,
+        applicableDays: schoolDays,
         requiresParent: true,
         category: "end_of_day",
         isDynamic: false,
@@ -172,7 +178,15 @@ async function seed() {
     ]);
     console.log("  ✓ Checklist templates created");
   } else {
-    console.log("  - Checklist templates already exist, skipping");
+    // Update existing templates to include weekends for Homework and Reading/Memory Work
+    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    for (const title of ["Homework", "Reading / Memory Work"]) {
+      await db
+        .update(checklistTemplates)
+        .set({ applicableDays: everyDay })
+        .where(eq(checklistTemplates.title, title));
+    }
+    console.log("  ✓ Checklist templates updated (weekends enabled for Homework & Reading)");
   }
 
   console.log("Seeding complete!");

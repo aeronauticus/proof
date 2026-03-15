@@ -13,14 +13,13 @@ import {
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
-import { toISODate, isSchoolDay } from "@/lib/school-days";
-import type { DayOfWeek } from "@/lib/school-days";
+import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
 
 /**
  * Generate the daily checklist for a given date.
  * Combines fixed templates with dynamic "Review [Subject] Notes" items.
  */
-async function generateChecklist(dateStr: string, dayOfWeek: DayOfWeek) {
+async function generateChecklist(dateStr: string, dayOfWeek: string) {
   // Check if already generated
   const existing = await db
     .select()
@@ -29,27 +28,32 @@ async function generateChecklist(dateStr: string, dayOfWeek: DayOfWeek) {
 
   if (existing.length > 0) return existing;
 
+  const isWeekend = dayOfWeek === "sat" || dayOfWeek === "sun";
+
   // Get templates applicable to this day
   const templates = await db.select().from(checklistTemplates);
   const applicableTemplates = templates.filter((t) =>
     (t.applicableDays as string[]).includes(dayOfWeek)
   );
 
-  // Get today's subjects for dynamic items
-  const todaySlots = await db
-    .select({
-      slotId: scheduleSlots.id,
-      subjectId: scheduleSlots.subjectId,
-      subjectName: subjects.name,
-      startTime: scheduleSlots.startTime,
-    })
-    .from(scheduleSlots)
-    .innerJoin(subjects, eq(scheduleSlots.subjectId, subjects.id))
-    .where(eq(scheduleSlots.dayOfWeek, dayOfWeek))
-    .orderBy(scheduleSlots.startTime);
+  // Get today's subjects for dynamic items (only on school days)
+  let reviewSubjects: Array<{ slotId: number; subjectId: number; subjectName: string; startTime: string }> = [];
+  if (!isWeekend) {
+    const todaySlots = await db
+      .select({
+        slotId: scheduleSlots.id,
+        subjectId: scheduleSlots.subjectId,
+        subjectName: subjects.name,
+        startTime: scheduleSlots.startTime,
+      })
+      .from(scheduleSlots)
+      .innerJoin(subjects, eq(scheduleSlots.subjectId, subjects.id))
+      .where(eq(scheduleSlots.dayOfWeek, dayOfWeek as "mon" | "tue" | "wed" | "thu" | "fri"))
+      .orderBy(scheduleSlots.startTime);
 
-  // Filter out Math from note review subjects
-  const reviewSubjects = todaySlots.filter((s) => s.subjectName !== "Math");
+    // Filter out Math from note review subjects
+    reviewSubjects = todaySlots.filter((s) => s.subjectName !== "Math");
+  }
 
   // Get any study sessions due today
   const todayStudySessions = await db
@@ -144,31 +148,34 @@ export async function GET(req: NextRequest) {
   const dateStr =
     req.nextUrl.searchParams.get("date") || toISODate(new Date());
 
-  const schoolDay = await isSchoolDay(dateStr);
-  if (!schoolDay) {
-    return NextResponse.json({ items: [], isSchoolDay: false });
+  // Check if it's a break (summer, holiday, etc.) — fully dormant
+  const onBreak = await isBreakDay(dateStr);
+  if (onBreak) {
+    return NextResponse.json({ items: [], isSchoolDay: false, isBreak: true });
   }
 
-  // Determine day of week
+  // Determine day of week (works for weekdays and weekends)
   const date = new Date(dateStr + "T12:00:00");
-  const days: DayOfWeek[] = ["sun" as DayOfWeek, "mon", "tue", "wed", "thu", "fri", "sat" as DayOfWeek];
-  const dow = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][
-    date.getDay()
-  ] as DayOfWeek;
+  const dow = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
+  const schoolDay = await isSchoolDay(dateStr);
 
   const items = await generateChecklist(dateStr, dow);
 
-  // Check if planner photo exists
-  const plannerPhoto = await db
-    .select()
-    .from(plannerPhotos)
-    .where(eq(plannerPhotos.date, dateStr))
-    .then((rows) => rows[0] || null);
+  // Check if planner photo exists (only relevant on school days)
+  let hasPlannerPhoto = false;
+  if (schoolDay) {
+    const plannerPhoto = await db
+      .select()
+      .from(plannerPhotos)
+      .where(eq(plannerPhotos.date, dateStr))
+      .then((rows) => rows[0] || null);
+    hasPlannerPhoto = !!plannerPhoto;
+  }
 
   return NextResponse.json({
     items,
-    isSchoolDay: true,
-    hasPlannerPhoto: !!plannerPhoto,
+    isSchoolDay: schoolDay,
+    hasPlannerPhoto,
   });
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 
 interface SchoolBreak {
@@ -12,6 +13,7 @@ interface SchoolBreak {
 }
 
 function SettingsContent() {
+  const router = useRouter();
   const session = useSession();
   const [breaks, setBreaks] = useState<SchoolBreak[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -19,6 +21,8 @@ function SettingsContent() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [type, setType] = useState("holiday");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailResult, setEmailResult] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/calendar")
@@ -51,11 +55,77 @@ function SettingsContent() {
     setBreaks((prev) => prev.filter((b) => b.id !== id));
   }
 
+  async function handleSendEmail() {
+    setEmailSending(true);
+    setEmailResult(null);
+    try {
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEmailResult(`Sent to: ${data.sentTo.join(", ")}`);
+      } else {
+        setEmailResult(`Error: ${data.error}`);
+      }
+    } catch {
+      setEmailResult("Failed to send email.");
+    }
+    setEmailSending(false);
+  }
+
   const isParent = session?.role === "parent";
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-900">Settings</h2>
+      <h2 className="text-2xl font-bold text-gray-900">More</h2>
+
+      {/* Quick Links */}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => router.push("/calendar")}
+          className="bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 transition-colors text-left"
+        >
+          <svg className="w-6 h-6 text-blue-500 mb-2" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <span className="font-medium text-gray-800 text-sm">Calendar</span>
+        </button>
+        <button
+          onClick={() => router.push("/stats")}
+          className="bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 transition-colors text-left"
+        >
+          <svg className="w-6 h-6 text-green-500 mb-2" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          <span className="font-medium text-gray-800 text-sm">Stats</span>
+        </button>
+      </div>
+
+      {/* Daily Email Summary */}
+      {isParent && (
+        <div className="bg-white rounded-xl p-4 border border-gray-200">
+          <h3 className="font-semibold text-gray-800 mb-3">Daily Email Summary</h3>
+          <p className="text-sm text-gray-500 mb-3">
+            An automatic summary is emailed every school day at 6:30 PM.
+            You can also send one manually right now.
+          </p>
+          <button
+            onClick={handleSendEmail}
+            disabled={emailSending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50"
+          >
+            {emailSending ? "Sending..." : "Send Summary Now"}
+          </button>
+          {emailResult && (
+            <p className={`mt-2 text-sm ${emailResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>
+              {emailResult}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl p-4 border border-gray-200">
         <div className="flex items-center justify-between mb-4">
