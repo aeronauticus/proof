@@ -675,11 +675,11 @@ function TestDetailContent() {
                   {studyGuide.content.vocabulary.length > 0 && (
                     <div>
                       <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">Vocabulary</h4>
-                      <div className="grid gap-1.5">
+                      <div className="space-y-2">
                         {studyGuide.content.vocabulary.map((v, i) => (
-                          <div key={i} className="flex gap-2 text-sm">
-                            <span className="font-semibold text-gray-800 min-w-0">{v.term}:</span>
-                            <span className="text-gray-600">{v.definition}</span>
+                          <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
+                            <div className="text-sm font-semibold text-gray-900">{v.term}</div>
+                            <div className="text-sm text-gray-600 mt-0.5">{v.definition}</div>
                           </div>
                         ))}
                       </div>
