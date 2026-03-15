@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 
 interface ChecklistItem {
@@ -13,6 +13,8 @@ interface ChecklistItem {
   requiresParent: boolean;
   subjectId: number | null;
   orderIndex: number;
+  notes: string | null;
+  photoPath: string | null;
 }
 
 interface ScheduleSlot {
@@ -63,6 +65,174 @@ function daysUntil(dateStr: string): number {
 
 function daysSince(dateStr: string): number {
   return -daysUntil(dateStr);
+}
+
+function ChecklistRow({
+  item,
+  hasPlannerPhoto,
+  onToggle,
+  onHomeworkPhoto,
+  onReadingNotes,
+}: {
+  item: ChecklistItem;
+  hasPlannerPhoto: boolean;
+  onToggle: (id: number) => void;
+  onHomeworkPhoto: (id: number, file: File) => void;
+  onReadingNotes: (id: number, notes: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [readingText, setReadingText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const isHomework = item.title === "Homework";
+  const isReading = item.title === "Reading / Memory Work";
+  const needsProof = isHomework || isReading;
+  const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
+
+  // Completed items — show proof if it exists
+  if (item.completed) {
+    return (
+      <div className={`px-4 py-3 ${item.verifiedBy ? "bg-green-50/50" : ""}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+            item.verifiedBy ? "border-green-500 bg-green-500" : "border-blue-500 bg-blue-500"
+          }`}>
+            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <span className="flex-1 text-sm text-gray-400 line-through">{item.title}</span>
+          {item.requiresParent && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              item.verifiedBy ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
+            }`}>
+              {item.verifiedBy ? "Verified" : "Pending"}
+            </span>
+          )}
+        </div>
+        {/* Show proof inline */}
+        {item.photoPath && (
+          <img src={item.photoPath} alt="Homework" className="mt-2 rounded-lg border border-gray-200 max-h-32 object-cover" />
+        )}
+        {item.notes && isReading && (
+          <p className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">{item.notes}</p>
+        )}
+      </div>
+    );
+  }
+
+  // Not completed — handle different item types
+  if (needsProof && !expanded) {
+    // Show as tappable row that expands
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        disabled={isBlocked}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+          isBlocked ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+        }`}
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">
+          {isHomework ? "Photo" : "Write"}
+        </span>
+      </button>
+    );
+  }
+
+  if (isHomework && expanded) {
+    return (
+      <div className="px-4 py-3 space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+          <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
+          <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
+        </div>
+        <p className="text-xs text-gray-500 ml-8">Take a photo of your completed homework.</p>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setSubmitting(true);
+            await onHomeworkPhoto(item.id, file);
+            setSubmitting(false);
+            setExpanded(false);
+          }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={submitting}
+          className="ml-8 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          {submitting ? "Uploading..." : "Take Photo"}
+        </button>
+      </div>
+    );
+  }
+
+  if (isReading && expanded) {
+    return (
+      <div className="px-4 py-3 space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+          <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
+          <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
+        </div>
+        <p className="text-xs text-gray-500 ml-8">What did you read? What memory work did you practice?</p>
+        <textarea
+          value={readingText}
+          onChange={(e) => setReadingText(e.target.value)}
+          rows={3}
+          className="w-full ml-8 mr-4 p-2 border border-gray-200 rounded-lg text-sm text-gray-800 resize-none focus:outline-none focus:border-blue-400"
+          style={{ width: "calc(100% - 2rem)" }}
+          placeholder="e.g., Read chapter 5 of History textbook and practiced Latin vocabulary list 3 aloud twice..."
+        />
+        <button
+          onClick={async () => {
+            setSubmitting(true);
+            await onReadingNotes(item.id, readingText);
+            setSubmitting(false);
+            setExpanded(false);
+          }}
+          disabled={submitting || readingText.trim().length < 10}
+          className="ml-8 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          {submitting ? "Saving..." : "Done"}
+        </button>
+      </div>
+    );
+  }
+
+  // Default: simple toggle items (Organization, End-of-Day, Review Notes, Study sessions)
+  return (
+    <button
+      onClick={() => !isBlocked && onToggle(item.id)}
+      disabled={isBlocked}
+      className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+        isBlocked ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+      }`}
+    >
+      <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+      <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+      {item.requiresParent && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">P</span>
+      )}
+      {isBlocked && (
+        <span className="text-[10px] text-yellow-600 font-medium">Planner first</span>
+      )}
+    </button>
+  );
 }
 
 function DashboardContent() {
@@ -137,6 +307,24 @@ function DashboardContent() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, action: "complete" }),
+    });
+    loadData();
+  }
+
+  async function handleHomeworkPhoto(itemId: number, file: File) {
+    const formData = new FormData();
+    formData.append("itemId", itemId.toString());
+    formData.append("action", "complete");
+    formData.append("photo", file);
+    await fetch("/api/checklist", { method: "PATCH", body: formData });
+    loadData();
+  }
+
+  async function handleReadingNotes(itemId: number, notes: string) {
+    await fetch("/api/checklist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, action: "complete", notes }),
     });
     loadData();
   }
@@ -308,7 +496,7 @@ function DashboardContent() {
             {checklist.map((item) => (
               <div
                 key={item.id}
-                className={`flex items-center gap-3 p-2 rounded-lg ${
+                className={`p-2 rounded-lg ${
                   item.verifiedBy
                     ? "bg-green-50"
                     : item.completed
@@ -316,34 +504,43 @@ function DashboardContent() {
                       : "bg-gray-50"
                 }`}
               >
-                <div
-                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                    item.verifiedBy
-                      ? "border-green-500 bg-green-500"
-                      : item.completed
-                        ? "border-blue-500 bg-blue-500"
-                        : "border-gray-300"
-                  }`}
-                >
-                  {(item.completed || item.verifiedBy) && (
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                      item.verifiedBy
+                        ? "border-green-500 bg-green-500"
+                        : item.completed
+                          ? "border-blue-500 bg-blue-500"
+                          : "border-gray-300"
+                    }`}
+                  >
+                    {(item.completed || item.verifiedBy) && (
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                  <span className={`flex-1 text-sm ${item.completed ? "text-gray-500" : "text-gray-800"}`}>
+                    {item.title}
+                  </span>
+                  {item.requiresParent && !item.verifiedBy && item.completed && (
+                    <button
+                      onClick={() => handleVerify(item.id)}
+                      className="text-xs px-2 py-1 bg-blue-600 text-white rounded"
+                    >
+                      Verify
+                    </button>
+                  )}
+                  {item.verifiedBy && (
+                    <span className="text-xs text-green-600 font-medium">Verified</span>
                   )}
                 </div>
-                <span className={`flex-1 text-sm ${item.completed ? "text-gray-500" : "text-gray-800"}`}>
-                  {item.title}
-                </span>
-                {item.requiresParent && !item.verifiedBy && item.completed && (
-                  <button
-                    onClick={() => handleVerify(item.id)}
-                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded"
-                  >
-                    Verify
-                  </button>
+                {/* Show proof submitted by Jack */}
+                {item.photoPath && (
+                  <img src={item.photoPath} alt="Homework proof" className="mt-2 ml-8 rounded-lg border border-gray-200 max-h-40 object-cover" />
                 )}
-                {item.verifiedBy && (
-                  <span className="text-xs text-green-600 font-medium">Verified</span>
+                {item.notes && item.title === "Reading / Memory Work" && (
+                  <p className="mt-1 ml-8 text-xs text-gray-600 bg-white/50 rounded p-2">{item.notes}</p>
                 )}
               </div>
             ))}
@@ -454,10 +651,10 @@ function DashboardContent() {
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
             completionPct === 100 ? "bg-green-500 text-white" : "bg-blue-500 text-white"
           }`}>
-            {completionPct === 100 ? "✓" : "2"}
+            {completionPct === 100 ? "✓" : isSchoolDay ? "2" : "1"}
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-gray-800">Daily Checklist</h3>
+            <h3 className="font-semibold text-gray-800">{isSchoolDay ? "Daily Checklist" : "Weekend Checklist"}</h3>
             <p className="text-xs text-gray-500">{completedCount} of {totalCount} done</p>
           </div>
           <div className="w-16 bg-gray-200 rounded-full h-1.5">
@@ -471,66 +668,16 @@ function DashboardContent() {
           </div>
         </div>
         <div className="divide-y divide-gray-50">
-          {checklist.map((item) => {
-            const isBlocked =
-              item.title === "Organization" && !hasPlannerPhoto;
-
-            return (
-              <button
-                key={item.id}
-                onClick={() => !item.completed && !isBlocked && handleChecklistToggle(item.id)}
-                disabled={item.completed || isBlocked}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                  item.verifiedBy
-                    ? "bg-green-50/50"
-                    : item.completed
-                      ? ""
-                      : isBlocked
-                        ? "opacity-40 cursor-not-allowed"
-                        : "hover:bg-gray-50 cursor-pointer active:bg-gray-100"
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                    item.verifiedBy
-                      ? "border-green-500 bg-green-500"
-                      : item.completed
-                        ? "border-blue-500 bg-blue-500"
-                        : "border-gray-300"
-                  }`}
-                >
-                  {(item.completed || item.verifiedBy) && (
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </div>
-                <span
-                  className={`flex-1 text-sm ${
-                    item.completed ? "text-gray-400 line-through" : "text-gray-800"
-                  }`}
-                >
-                  {item.title}
-                </span>
-                {item.requiresParent && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                    item.verifiedBy
-                      ? "bg-green-100 text-green-600"
-                      : item.completed
-                        ? "bg-blue-100 text-blue-600"
-                        : "bg-gray-100 text-gray-400"
-                  }`}>
-                    {item.verifiedBy ? "Verified" : item.completed ? "Pending" : "P"}
-                  </span>
-                )}
-                {isBlocked && (
-                  <span className="text-[10px] text-yellow-600 font-medium">
-                    Planner first
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {checklist.map((item) => (
+            <ChecklistRow
+              key={item.id}
+              item={item}
+              hasPlannerPhoto={hasPlannerPhoto}
+              onToggle={handleChecklistToggle}
+              onHomeworkPhoto={handleHomeworkPhoto}
+              onReadingNotes={handleReadingNotes}
+            />
+          ))}
         </div>
       </div>
       )}

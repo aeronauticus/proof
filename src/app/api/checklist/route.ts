@@ -14,6 +14,9 @@ import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
+import { writeFile, mkdir } from "fs/promises";
+import { join } from "path";
+import { randomUUID } from "crypto";
 
 /**
  * Generate the daily checklist for a given date.
@@ -145,21 +148,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const dateStr =
+  const rawDate =
     req.nextUrl.searchParams.get("date") || toISODate(new Date());
 
   // Check if it's a break (summer, holiday, etc.) — fully dormant
-  const onBreak = await isBreakDay(dateStr);
+  const onBreak = await isBreakDay(rawDate);
   if (onBreak) {
     return NextResponse.json({ items: [], isSchoolDay: false, isBreak: true });
   }
 
-  // Determine day of week (works for weekdays and weekends)
-  const date = new Date(dateStr + "T12:00:00");
-  const dow = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
-  const schoolDay = await isSchoolDay(dateStr);
+  // Determine day of week
+  const date = new Date(rawDate + "T12:00:00");
+  const dayIndex = date.getDay();
+  const dow = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][dayIndex];
+  const isWeekend = dayIndex === 0 || dayIndex === 6;
+  const schoolDay = !isWeekend;
 
-  const items = await generateChecklist(dateStr, dow);
+  // Weekend: use Saturday's date as the canonical date so Sat+Sun share one checklist
+  let dateStr = rawDate;
+  if (dayIndex === 0) {
+    // Sunday — roll back to Saturday
+    const sat = new Date(date);
+    sat.setDate(sat.getDate() - 1);
+    dateStr = toISODate(sat);
+  }
+
+  // For weekend checklists, generate using "sat" as the day key
+  const checklistDow = isWeekend ? "sat" : dow;
+  const items = await generateChecklist(dateStr, checklistDow);
 
   // Check if planner photo exists (only relevant on school days)
   let hasPlannerPhoto = false;
@@ -179,17 +195,37 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// PATCH /api/checklist — toggle completion or verify
+// PATCH /api/checklist — complete or verify a checklist item
+// Accepts JSON for simple complete/verify, or FormData for photo-required items
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { itemId, action } = await req.json();
+  const contentType = req.headers.get("content-type") || "";
+
+  let itemId: number;
+  let action: string;
+  let notes: string | null = null;
+  let photoFile: File | null = null;
+
+  if (contentType.includes("multipart/form-data")) {
+    // FormData — used for homework photo upload
+    const formData = await req.formData();
+    itemId = parseInt(formData.get("itemId") as string);
+    action = formData.get("action") as string;
+    notes = (formData.get("notes") as string) || null;
+    photoFile = formData.get("photo") as File | null;
+  } else {
+    // JSON — used for simple complete/verify and reading notes
+    const body = await req.json();
+    itemId = body.itemId;
+    action = body.action;
+    notes = body.notes || null;
+  }
 
   if (action === "complete") {
-    // Student marks item as completed
     const item = await db
       .select()
       .from(dailyChecklist)
@@ -200,7 +236,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Item not found" }, { status: 404 });
     }
 
-    // Check planner photo gate: Organization can't be checked without planner photo
+    // Gate: Organization requires planner photo
     if (item.title === "Organization") {
       const plannerPhoto = await db
         .select()
@@ -216,18 +252,58 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Gate: Homework requires a photo
+    if (item.title === "Homework") {
+      if (!photoFile) {
+        return NextResponse.json(
+          { error: "Photo of completed homework is required" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Gate: Reading / Memory Work requires notes
+    if (item.title === "Reading / Memory Work") {
+      if (!notes || notes.trim().length < 10) {
+        return NextResponse.json(
+          { error: "Please describe what you read or practiced (at least a couple sentences)" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Save photo if provided
+    let photoPath: string | null = null;
+    if (photoFile) {
+      const ext = photoFile.name.split(".").pop() || "jpg";
+      const filename = `checklist-${item.date}-${itemId}-${randomUUID()}.${ext}`;
+      const uploadDir = join(process.cwd(), "public", "uploads", "checklist");
+      await mkdir(uploadDir, { recursive: true });
+      const filepath = join(uploadDir, filename);
+      const bytes = await photoFile.arrayBuffer();
+      await writeFile(filepath, Buffer.from(bytes));
+      photoPath = `/uploads/checklist/${filename}`;
+    }
+
     await db
       .update(dailyChecklist)
-      .set({ completed: true, completedAt: new Date() })
+      .set({
+        completed: true,
+        completedAt: new Date(),
+        notes: notes || item.notes,
+        photoPath: photoPath || item.photoPath,
+      })
       .where(eq(dailyChecklist.id, itemId));
 
-    await logAction(session.userId, "complete", "checklist", itemId);
+    await logAction(session.userId, "complete", "checklist", itemId, null, {
+      hasPhoto: !!photoPath,
+      hasNotes: !!notes,
+    });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, photoPath });
   }
 
   if (action === "verify") {
-    // Parent verifies item
     if (session.role !== "parent") {
       return NextResponse.json(
         { error: "Parent access required" },

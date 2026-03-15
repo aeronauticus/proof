@@ -113,7 +113,7 @@ async function seed() {
   const existingTemplates = await db.select().from(checklistTemplates);
   if (existingTemplates.length === 0) {
     const schoolDays = ["mon", "tue", "wed", "thu", "fri"];
-    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat"];
 
     await db.insert(checklistTemplates).values([
       {
@@ -179,7 +179,7 @@ async function seed() {
     console.log("  ✓ Checklist templates created");
   } else {
     // Update existing templates to include weekends for Homework and Reading/Memory Work
-    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const everyDay = ["mon", "tue", "wed", "thu", "fri", "sat"];
     for (const title of ["Homework", "Reading / Memory Work"]) {
       await db
         .update(checklistTemplates)

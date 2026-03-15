@@ -240,6 +240,7 @@ export const dailyChecklist = pgTable(
     verifiedBy: integer("verified_by").references(() => users.id),
     verifiedAt: timestamp("verified_at"),
     notes: text("notes"),
+    photoPath: text("photo_path"),
     orderIndex: integer("order_index").notNull(),
     requiresParent: boolean("requires_parent").default(false).notNull(),
   },
