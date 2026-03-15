@@ -8,6 +8,7 @@ import { toISODate } from "@/lib/school-days";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { uploadDir, uploadUrl } from "@/lib/uploads";
 
 // POST /api/planner — upload planner photo
 export async function POST(req: NextRequest) {
@@ -41,14 +42,14 @@ export async function POST(req: NextRequest) {
   // Save file
   const ext = file.name.split(".").pop() || "jpg";
   const filename = `${date}-${randomUUID()}.${ext}`;
-  const uploadDir = join(process.cwd(), "public", "uploads", "planner");
-  await mkdir(uploadDir, { recursive: true });
-  const filepath = join(uploadDir, filename);
+  const dir = uploadDir("planner");
+  await mkdir(dir, { recursive: true });
+  const filepath = join(dir, filename);
 
   const bytes = await file.arrayBuffer();
   await writeFile(filepath, Buffer.from(bytes));
 
-  const photoPath = `/uploads/planner/${filename}`;
+  const photoPath = uploadUrl("planner", filename);
 
   const [created] = await db
     .insert(plannerPhotos)

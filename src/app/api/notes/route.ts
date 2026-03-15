@@ -8,6 +8,7 @@ import { toISODate } from "@/lib/school-days";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { uploadDir, uploadUrl } from "@/lib/uploads";
 import { evaluateNotes, evaluateAnswer } from "@/lib/ai/notes-evaluator";
 
 // GET /api/notes?date=2026-03-14
@@ -86,14 +87,14 @@ export async function POST(req: NextRequest) {
   // Save file
   const ext = file.name.split(".").pop() || "jpg";
   const filename = `notes-${date}-${subjectId}-${randomUUID()}.${ext}`;
-  const uploadDir = join(process.cwd(), "public", "uploads", "notes");
-  await mkdir(uploadDir, { recursive: true });
-  const filepath = join(uploadDir, filename);
+  const dir = uploadDir("notes");
+  await mkdir(dir, { recursive: true });
+  const filepath = join(dir, filename);
 
   const bytes = await file.arrayBuffer();
   await writeFile(filepath, Buffer.from(bytes));
 
-  const photoPath = `/uploads/notes/${filename}`;
+  const photoPath = uploadUrl("notes", filename);
 
   // Use AI to evaluate notes and generate quiz
   let evaluation;

@@ -7,6 +7,7 @@ import { logAction } from "@/lib/audit";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { uploadDir, uploadUrl } from "@/lib/uploads";
 import { readScoreFromPhoto } from "@/lib/ai/score-reader";
 
 // POST /api/tests/[id]/photo — upload graded test photo, AI reads score
@@ -49,14 +50,14 @@ export async function POST(
   // Save file
   const ext = file.name.split(".").pop() || "jpg";
   const filename = `test-${testId}-${randomUUID()}.${ext}`;
-  const uploadDir = join(process.cwd(), "public", "uploads", "tests");
-  await mkdir(uploadDir, { recursive: true });
-  const filepath = join(uploadDir, filename);
+  const dir = uploadDir("tests");
+  await mkdir(dir, { recursive: true });
+  const filepath = join(dir, filename);
 
   const bytes = await file.arrayBuffer();
   await writeFile(filepath, Buffer.from(bytes));
 
-  const photoPath = `/uploads/tests/${filename}`;
+  const photoPath = uploadUrl("tests", filename);
 
   // Use AI to read the score
   let scoreResult;

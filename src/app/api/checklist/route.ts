@@ -17,6 +17,7 @@ import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { uploadDir as getUploadDir, uploadUrl } from "@/lib/uploads";
 
 /**
  * Generate the daily checklist for a given date.
@@ -230,16 +231,16 @@ export async function PATCH(req: NextRequest) {
 
   // Helper: save multiple photos, return array of paths
   async function savePhotos(files: File[], date: string, id: number): Promise<string[]> {
-    const uploadDir = join(process.cwd(), "public", "uploads", "checklist");
-    await mkdir(uploadDir, { recursive: true });
+    const dir = getUploadDir("checklist");
+    await mkdir(dir, { recursive: true });
     const paths: string[] = [];
     for (const file of files) {
       const ext = file.name.split(".").pop() || "jpg";
       const filename = `checklist-${date}-${id}-${randomUUID()}.${ext}`;
-      const filepath = join(uploadDir, filename);
+      const filepath = join(dir, filename);
       const bytes = await file.arrayBuffer();
       await writeFile(filepath, Buffer.from(bytes));
-      paths.push(`/uploads/checklist/${filename}`);
+      paths.push(uploadUrl("checklist", filename));
     }
     return paths;
   }
