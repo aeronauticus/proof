@@ -278,13 +278,7 @@ function TestDetailContent() {
     setUploadingMaterial(false);
     setUploadProgress(null);
     if (materialFileRef.current) materialFileRef.current.value = "";
-    // Final sync then auto-generate/update study guide
-    await loadTest();
-    // Only generate if there are readable materials
-    const readable = [...materials].filter((m) => m.extractedContent).length + (total - failed);
-    if (readable > 0) {
-      handleGenerateGuide();
-    }
+    loadTest();
   }
 
   async function handleGenerateGuide() {
@@ -613,43 +607,41 @@ function TestDetailContent() {
                     : "Upload Study Materials"}
             </button>
 
-            {/* Guide generation status */}
-            {generatingGuide && (
-              <div className="mt-2 py-3 text-center">
-                <p className="text-sm text-green-700 font-medium animate-pulse">
-                  Creating your study guide & practice quiz...
-                </p>
-                {materials.filter((m) => m.extractedContent).length > 15 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    This may take a minute with {materials.filter((m) => m.extractedContent).length} photos...
-                  </p>
-                )}
-              </div>
-            )}
-
-            {guideError && (
-              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700 font-medium">Failed to generate study guide</p>
-                <p className="text-xs text-red-600 mt-1 break-words">{guideError}</p>
-                <button
-                  onClick={handleGenerateGuide}
-                  disabled={generatingGuide}
-                  className="mt-2 text-xs text-red-700 font-medium underline"
-                >
-                  Try again
-                </button>
-              </div>
-            )}
-
-            {/* Regenerate button — only when guide exists and user wants to refresh */}
-            {studyGuide && !generatingGuide && !guideError && materials.length > 0 && !uploadingMaterial && (
-              <button
-                onClick={handleGenerateGuide}
-                className="w-full mt-2 py-2 text-sm text-green-700 font-medium border border-green-200 rounded-xl hover:bg-green-50 transition-colors"
-              >
-                Regenerate Study Guide ({materials.filter((m) => m.extractedContent).length} photos)
-              </button>
-            )}
+            {/* Generate / update study guide */}
+            {materials.length > 0 && !uploadingMaterial && (() => {
+              const readableCount = materials.filter((m) => m.extractedContent).length;
+              return (
+                <>
+                  {readableCount === 0 && !generatingGuide && (
+                    <p className="mt-2 text-sm text-red-600 font-medium text-center">
+                      None of your photos could be read. Try retaking them with better lighting.
+                    </p>
+                  )}
+                  <button
+                    onClick={handleGenerateGuide}
+                    disabled={generatingGuide || readableCount === 0}
+                    className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors"
+                  >
+                    {generatingGuide
+                      ? "Creating your study guide & practice quiz..."
+                      : studyGuide
+                        ? `Update Study Guide & Quiz (${readableCount} photos)`
+                        : `Generate Study Guide & Quiz (${readableCount} photos)`}
+                  </button>
+                  {generatingGuide && readableCount > 15 && (
+                    <p className="mt-1 text-xs text-gray-500 text-center">
+                      This may take a minute with {readableCount} photos...
+                    </p>
+                  )}
+                  {guideError && (
+                    <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-700 font-medium">Failed to generate study guide</p>
+                      <p className="text-xs text-red-600 mt-1 break-words">{guideError}</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           {/* Study Guide */}
