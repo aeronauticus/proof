@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const pressStart2P = Press_Start_2P({
+  weight: "400",
+  variable: "--font-pixel",
   subsets: ["latin"],
 });
 
@@ -36,7 +42,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#2563eb" />
         <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
       </head>
-      <body className={`${geistSans.variable} font-sans antialiased bg-gray-50 min-h-screen`}>
+      <body className={`${geistSans.variable} ${pressStart2P.variable} font-sans antialiased bg-gray-50 min-h-screen`}>
         {children}
         <script
           dangerouslySetInnerHTML={{

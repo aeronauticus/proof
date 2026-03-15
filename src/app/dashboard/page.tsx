@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
+import CelebrationOverlay from "@/components/ui/CelebrationOverlay";
 
 interface PlannerAssignment {
   subject: string;
@@ -33,6 +35,15 @@ interface AiHomeworkEval {
   parentNote: string;
 }
 
+interface StudyContext {
+  testDate: string;
+  technique: string;
+  durationMin: number;
+  description: string | null;
+  testTitle: string;
+  subjectName: string;
+}
+
 interface ChecklistItem {
   id: number;
   title: string;
@@ -42,11 +53,34 @@ interface ChecklistItem {
   verifiedAt: string | null;
   requiresParent: boolean;
   subjectId: number | null;
+  studySessionId: number | null;
   orderIndex: number;
   notes: string | null;
   photoPaths: string[] | null;
   aiHomeworkEval: AiHomeworkEval | null;
   studentConfirmedComplete: boolean;
+  studyContext?: StudyContext;
+}
+
+interface StudyProgressTest {
+  testId: number;
+  testTitle: string;
+  testDate: string;
+  testType: string;
+  testStatus: string;
+  subjectName: string;
+  subjectColor: string;
+  totalSessions: number;
+  completedSessions: number;
+  nextSession: {
+    id: number;
+    sessionDate: string;
+    title: string;
+    technique: string;
+    durationMin: number;
+    description: string | null;
+    completed: boolean;
+  } | null;
 }
 
 interface ScheduleSlot {
@@ -176,7 +210,7 @@ function ChecklistRow({
     return (
       <div className={`px-4 py-3 ${item.verifiedBy ? "bg-green-50/50" : ""}`}>
         <div className="flex items-center gap-3">
-          <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+          <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center animate-checkmark-pop ${
             item.verifiedBy ? "border-green-500 bg-green-500" : "border-blue-500 bg-blue-500"
           }`}>
             <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
@@ -379,6 +413,49 @@ function ChecklistRow({
     );
   }
 
+  // Study session items — show expanded context
+  if (item.studyContext) {
+    const ctx = item.studyContext;
+    const days = daysUntil(ctx.testDate);
+    const techniqueLabels: Record<string, string> = {
+      review: "Review",
+      active_recall: "Active Recall",
+      practice_test: "Practice Test",
+      spaced_review: "Spaced Review",
+      elaboration: "Elaboration",
+      interleaving: "Interleaving",
+    };
+    return (
+      <div className="px-4 py-3 space-y-1.5">
+        <button
+          onClick={() => onToggle(item.id)}
+          className="w-full flex items-start gap-3 text-left hover:bg-gray-50 rounded-lg transition-colors cursor-pointer active:bg-gray-100 -mx-1 px-1"
+        >
+          <div className="w-5 h-5 rounded-full border-2 border-purple-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-800">{item.title}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                days <= 1 ? "bg-red-100 text-red-700" : days <= 3 ? "bg-amber-100 text-amber-700" : "bg-purple-100 text-purple-700"
+              }`}>
+                {days === 0 ? "TEST TODAY" : days === 1 ? "Test tmrw" : `${days}d to test`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-medium">
+                {techniqueLabels[ctx.technique] || ctx.technique}
+              </span>
+              <span className="text-[11px] text-gray-400">{ctx.durationMin} min</span>
+            </div>
+            {ctx.description && (
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">{ctx.description}</p>
+            )}
+          </div>
+        </button>
+      </div>
+    );
+  }
+
   // Default: simple toggle items
   return (
     <button
@@ -528,6 +605,7 @@ function PlannerReview({
 
 function DashboardContent() {
   const session = useSession();
+  const router = useRouter();
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [schedule, setSchedule] = useState<ScheduleSlot[]>([]);
   const [assignmentsDue, setAssignmentsDue] = useState<Assignment[]>([]);
@@ -539,29 +617,41 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [plannerExtraction, setPlannerExtraction] = useState<PlannerExtraction | null>(null);
+  const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const prevCompletionRef = useRef(0);
 
   const today = new Date().toISOString().split("T")[0];
 
   const loadData = useCallback(async () => {
     try {
-      const [checklistRes, scheduleRes, assignmentsRes, testsRes] =
+      const [checklistRes, scheduleRes, assignmentsRes, testsRes, studyProgressRes] =
         await Promise.all([
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
           fetch(`/api/assignments?status=pending&from=${today}&to=${today}`),
           fetch(`/api/tests`),
+          fetch(`/api/study-progress`),
         ]);
 
       const checklistData = await checklistRes.json();
       const scheduleData = await scheduleRes.json();
       const assignmentsData = await assignmentsRes.json();
       const testsData = await testsRes.json();
+      const studyProgressData = await studyProgressRes.json();
 
       setChecklist(checklistData.items || []);
       setIsSchoolDay(checklistData.isSchoolDay);
       setHasPlannerPhoto(checklistData.hasPlannerPhoto);
       setSchedule(scheduleData.slots || []);
       setAssignmentsDue(assignmentsData.assignments || []);
+      setStudyProgress(
+        (studyProgressData.tests || []).filter(
+          (t: StudyProgressTest) =>
+            (t.testStatus === "upcoming" || t.testStatus === "taken") &&
+            daysUntil(t.testDate) >= 0
+        )
+      );
 
       const allTests = testsData.tests || [];
       setUpcomingTests(
@@ -683,23 +773,6 @@ function DashboardContent() {
     loadData(); // reload to show new assignments/tests
   }
 
-  async function handleCompleteAssignment(id: number) {
-    await fetch("/api/assignments", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action: "complete" }),
-    });
-    loadData();
-  }
-
-  async function handleVerifyAssignment(id: number) {
-    await fetch("/api/assignments", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action: "verify" }),
-    });
-    loadData();
-  }
 
   if (loading) {
     return (
@@ -714,104 +787,182 @@ function DashboardContent() {
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const hasChecklist = totalCount > 0;
 
+  // Trigger celebration when all items completed
+  useEffect(() => {
+    if (
+      completionPct === 100 &&
+      prevCompletionRef.current < 100 &&
+      totalCount > 0 &&
+      !loading &&
+      session?.role === "student"
+    ) {
+      setShowCelebration(true);
+    }
+    prevCompletionRef.current = completionPct;
+  }, [completionPct, totalCount, loading, session?.role]);
+
   // ── Parent View ──────────────────────────────────────────────────────────
   if (session?.role === "parent") {
+    // Build unified action items
+    const actionItems: Array<{ type: string; priority: number; node: React.ReactNode }> = [];
+
+    // Overdue test returns (highest priority)
+    for (const test of overdueTests) {
+      actionItems.push({
+        type: "overdue",
+        priority: 0,
+        node: (
+          <div key={`overdue-${test.id}`} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: test.subjectColor }} />
+              <div>
+                <span className="text-sm font-medium text-red-900">{test.subjectName} {test.type}</span>
+                <span className="text-xs text-red-600 ml-2">— {daysSince(test.expectedReturnDate!)}d overdue</span>
+              </div>
+            </div>
+            <span className="text-[10px] px-2 py-1 bg-red-100 text-red-700 rounded-full font-bold">OVERDUE</span>
+          </div>
+        ),
+      });
+    }
+
+    // AI-flagged homework items
+    const aiFlagged = checklist.filter(
+      (i) => i.aiHomeworkEval && (i.aiHomeworkEval.missingAnswers || !i.aiHomeworkEval.appearsComplete)
+    );
+    for (const item of aiFlagged) {
+      actionItems.push({
+        type: "ai_flag",
+        priority: 1,
+        node: (
+          <div key={`ai-${item.id}`} className="p-3 bg-amber-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-amber-900">{item.title}</span>
+              <span className="text-[10px] px-2 py-1 bg-amber-100 text-amber-700 rounded-full font-bold">AI FLAG</span>
+            </div>
+            <p className="text-xs text-amber-700 mt-1">{item.aiHomeworkEval!.parentNote}</p>
+            {item.studentConfirmedComplete && (
+              <p className="text-[11px] text-amber-600 mt-1 font-medium">Jack confirmed complete despite warning</p>
+            )}
+          </div>
+        ),
+      });
+    }
+
+    // Verification queue
+    for (const item of pendingVerification) {
+      actionItems.push({
+        type: "verify",
+        priority: 2,
+        node: (
+          <div key={`verify-${item.id}`} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-gray-800">{item.title}</span>
+              <PhotoThumbnails photos={item.photoPaths || []} size="h-12 w-12" className="mt-1.5" />
+            </div>
+            <button
+              onClick={() => handleVerify(item.id)}
+              className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex-shrink-0 ml-3"
+            >
+              Verify
+            </button>
+          </div>
+        ),
+      });
+    }
+
+    actionItems.sort((a, b) => a.priority - b.priority);
+    const hasActions = actionItems.length > 0;
+
     return (
       <div className="space-y-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900">Parent Dashboard</h2>
-          <p className="text-gray-500 text-sm">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
-        </div>
-
-        {/* Overdue Tests Alert */}
-        {overdueTests.length > 0 && (
-          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-            <h3 className="font-bold text-red-800 mb-2">
-              Overdue Test Returns
-            </h3>
-            {overdueTests.map((test) => (
-              <div key={test.id} className="flex items-center justify-between py-2">
-                <div>
-                  <span
-                    className="inline-block w-3 h-3 rounded-full mr-2"
-                    style={{ backgroundColor: test.subjectColor }}
-                  />
-                  <span className="font-medium text-red-900">
-                    {test.subjectName} {test.type}
-                  </span>
-                  <span className="text-red-600 text-sm ml-2">
-                    — {daysSince(test.expectedReturnDate!)} days overdue
-                  </span>
-                </div>
-              </div>
-            ))}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Parent Dashboard</h2>
+            <p className="text-gray-500 text-sm">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
           </div>
-        )}
-
-        {/* Planner Photo */}
-        <div className={`rounded-xl p-4 border-2 ${hasPlannerPhoto ? "bg-green-50 border-green-200" : "bg-yellow-50 border-yellow-200"}`}>
-          <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-600 mb-1">
-            Planner Photo
-          </h3>
-          {hasPlannerPhoto ? (
-            <p className="text-green-700">Uploaded today</p>
-          ) : (
-            <p className="text-yellow-700 font-medium">Not yet uploaded</p>
+          {/* Progress ring */}
+          {hasChecklist && (
+            <div className="relative w-14 h-14">
+              <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#E5E7EB" strokeWidth="3" />
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"} strokeWidth="3" strokeDasharray={`${completionPct}, 100`} />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold">{completionPct}%</span>
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Today's Progress */}
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <h3 className="font-semibold text-gray-800 mb-3">Today&apos;s Progress</h3>
-          <div className="flex items-center gap-4">
-            <div className="relative w-16 h-16">
-              <svg className="w-16 h-16 -rotate-90" viewBox="0 0 36 36">
-                <path
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  fill="none"
-                  stroke="#E5E7EB"
-                  strokeWidth="3"
-                />
-                <path
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  fill="none"
-                  stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"}
-                  strokeWidth="3"
-                  strokeDasharray={`${completionPct}, 100`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center text-sm font-bold">
-                {completionPct}%
-              </div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold">{completedCount} / {totalCount}</div>
-              <div className="text-sm text-gray-500">checklist items done</div>
+        {/* Planner Photo status */}
+        {isSchoolDay && (
+          <div className={`rounded-xl px-4 py-3 border ${hasPlannerPhoto ? "bg-green-50 border-green-200" : "bg-yellow-50 border-yellow-300"}`}>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${hasPlannerPhoto ? "text-green-700" : "text-yellow-700 font-medium"}`}>
+                {hasPlannerPhoto ? "Planner photo uploaded" : "Planner photo not yet uploaded"}
+              </span>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Verification Queue */}
-        {pendingVerification.length > 0 && (
-          <div className="bg-white rounded-xl p-4 border border-gray-200">
-            <h3 className="font-semibold text-gray-800 mb-3">
-              Needs Verification ({pendingVerification.length})
+        {/* Unified Action Required */}
+        {hasActions && (
+          <div className="bg-white rounded-xl p-4 border-2 border-orange-200">
+            <h3 className="font-bold text-gray-800 mb-3">
+              Action Required ({actionItems.length})
             </h3>
             <div className="space-y-2">
-              {pendingVerification.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-3 bg-blue-50 rounded-lg"
-                >
-                  <span className="text-gray-800">{item.title}</span>
-                  <button
-                    onClick={() => handleVerify(item.id)}
-                    className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-                  >
-                    Verify
-                  </button>
-                </div>
+              {actionItems.map((item, i) => (
+                <div key={i}>{item.node}</div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Upcoming Tests with Study Progress (parent view) */}
+        {studyProgress.length > 0 && (
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-3">
+              Test Prep Progress
+            </h3>
+            <div className="space-y-3">
+              {studyProgress.map((test) => {
+                const days = daysUntil(test.testDate);
+                const pct = test.totalSessions > 0
+                  ? Math.round((test.completedSessions / test.totalSessions) * 100)
+                  : 0;
+                return (
+                  <div key={test.testId} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: test.subjectColor }} />
+                        <span className="text-sm font-medium text-gray-800">{test.subjectName} {test.testType}</span>
+                      </div>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        days <= 1 ? "bg-red-100 text-red-700" : days <= 3 ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                      }`}>
+                        {days === 0 ? "TODAY" : days === 1 ? "Tomorrow" : `${days}d`}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 ml-4.5">{test.testTitle}</div>
+                    {test.totalSessions > 0 && (
+                      <div className="flex items-center gap-2 ml-4.5">
+                        <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                          <div
+                            className="h-1.5 rounded-full"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: pct >= 80 ? "#22C55E" : pct >= 40 ? "#EAB308" : "#EF4444",
+                            }}
+                          />
+                        </div>
+                        <span className="text-[11px] text-gray-400">{test.completedSessions}/{test.totalSessions}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -888,6 +1039,11 @@ function DashboardContent() {
   // ── Student View ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      {/* Celebration overlay */}
+      {showCelebration && (
+        <CelebrationOverlay onDismiss={() => setShowCelebration(false)} />
+      )}
+
       {/* Header with date and progress ring */}
       <div className="flex items-center justify-between">
         <div>
@@ -901,7 +1057,7 @@ function DashboardContent() {
           </p>
         </div>
         {hasChecklist && (
-          <div className="relative w-14 h-14">
+          <div className={`relative w-14 h-14 ${completionPct === 100 ? "animate-pixel-bounce" : ""}`}>
             <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
               <path
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
@@ -918,7 +1074,11 @@ function DashboardContent() {
               />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-xs font-bold">{completionPct}%</span>
+              {completionPct === 100 ? (
+                <span className="text-lg" role="img" aria-label="star">&#11088;</span>
+              ) : (
+                <span className="text-xs font-bold">{completionPct}%</span>
+              )}
             </div>
           </div>
         )}
@@ -939,7 +1099,8 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Step 1: Planner Photo (always visible — Jack may upload on weekends too) */}
+      {/* Step 1: Planner Photo (school days + Saturday for late Friday uploads) */}
+      {(isSchoolDay || new Date().getDay() === 6) && (
       <div className={`rounded-xl p-4 border-2 ${
         hasPlannerPhoto
           ? "bg-green-50 border-green-200"
@@ -976,6 +1137,7 @@ function DashboardContent() {
           )}
         </div>
       </div>
+      )}
 
       {/* Planner AI extraction review */}
       {plannerExtraction && (
@@ -986,7 +1148,7 @@ function DashboardContent() {
         />
       )}
 
-      {/* Step 2: Daily Checklist */}
+      {/* Step 2: Daily Quests */}
       {hasChecklist && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
@@ -996,17 +1158,31 @@ function DashboardContent() {
             {completionPct === 100 ? "✓" : "2"}
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-gray-800">{isSchoolDay ? "Daily Checklist" : "Weekend Checklist"}</h3>
-            <p className="text-xs text-gray-500">{completedCount} of {totalCount} done</p>
+            <h3 className="font-semibold text-gray-800">
+              {completionPct === 100
+                ? "All Quests Complete!"
+                : isSchoolDay
+                  ? "Daily Quests"
+                  : "Weekend Quests"}
+            </h3>
+            <p className="text-xs text-gray-500">
+              {completedCount} of {totalCount} {completionPct === 100 ? "done" : "remaining"}
+            </p>
           </div>
-          <div className="w-16 bg-gray-200 rounded-full h-1.5">
-            <div
-              className="h-1.5 rounded-full transition-all"
-              style={{
-                width: `${completionPct}%`,
-                backgroundColor: completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444",
-              }}
-            />
+          {/* HP-style progress bar */}
+          <div className="w-20">
+            <div className="bg-gray-200 rounded-sm h-2.5 border border-gray-300 overflow-hidden">
+              <div
+                className={`h-full rounded-sm transition-all ${completionPct === 100 ? "progress-bar-shine" : ""}`}
+                style={{
+                  width: `${completionPct}%`,
+                  backgroundColor: completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444",
+                }}
+              />
+            </div>
+            <div className="text-[9px] text-gray-400 text-right mt-0.5" style={{ fontFamily: "var(--font-pixel), monospace" }}>
+              {completedCount}/{totalCount}
+            </div>
           </div>
         </div>
         <div className="divide-y divide-gray-50">
@@ -1026,43 +1202,79 @@ function DashboardContent() {
       </div>
       )}
 
-      {/* Upcoming Tests */}
-      {upcomingTests.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-          <h3 className="font-semibold text-amber-800 text-sm mb-2">
+      {/* This Week — Tests with Study Progress */}
+      {studyProgress.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-3">
             Upcoming Tests
           </h3>
-          {upcomingTests.map((test) => {
-            const days = daysUntil(test.testDate);
-            return (
-              <div key={test.id} className="flex items-center justify-between py-1.5">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: test.subjectColor }}
-                  />
-                  <span className="text-sm text-gray-800 font-medium">{test.title}</span>
+          <div className="space-y-3">
+            {studyProgress.map((test) => {
+              const days = daysUntil(test.testDate);
+              const pct = test.totalSessions > 0
+                ? Math.round((test.completedSessions / test.totalSessions) * 100)
+                : 0;
+              return (
+                <div key={test.testId} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: test.subjectColor }}
+                      />
+                      <span className="text-sm text-gray-800 font-medium truncate">
+                        {test.subjectName} {test.testType}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                        days <= 1
+                          ? "bg-red-100 text-red-700"
+                          : days <= 3
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-blue-100 text-blue-700"
+                      }`}
+                    >
+                      {days === 0 ? "TODAY" : days === 1 ? "Tomorrow" : `${days} days`}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 ml-4.5 pl-0.5">{test.testTitle}</div>
+                  {test.totalSessions > 0 && (
+                    <div className="ml-4.5 pl-0.5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                          <div
+                            className="h-1.5 rounded-full transition-all"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: pct >= 80 ? "#22C55E" : pct >= 40 ? "#EAB308" : "#8B5CF6",
+                            }}
+                          />
+                        </div>
+                        <span className="text-[11px] text-gray-400 flex-shrink-0">
+                          {test.completedSessions}/{test.totalSessions} studied
+                        </span>
+                      </div>
+                      {test.nextSession && test.nextSession.sessionDate === today && (
+                        <p className="text-[11px] text-purple-600 mt-1 font-medium">
+                          Today: {test.nextSession.title} ({test.nextSession.durationMin} min)
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <span
-                  className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                    days <= 1
-                      ? "bg-red-100 text-red-700"
-                      : days <= 3
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-blue-100 text-blue-700"
-                  }`}
-                >
-                  {days === 0 ? "TODAY" : days === 1 ? "Tomorrow" : `${days}d`}
-                </span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Assignments Due Today */}
       {assignmentsDue.length > 0 && (
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
+        <button
+          onClick={() => router.push("/assignments")}
+          className="w-full bg-white rounded-xl p-4 border border-gray-200 text-left"
+        >
           <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-2">
             Due Today
           </h3>
@@ -1070,39 +1282,30 @@ function DashboardContent() {
             {assignmentsDue.map((a) => (
               <div
                 key={a.id}
-                className="flex items-center gap-3 p-2.5 bg-gray-50 rounded-lg"
+                className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg"
               >
                 <span
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                   style={{ backgroundColor: a.subjectColor }}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-800 truncate">{a.title}</div>
+                  <div className="text-sm font-medium text-gray-800">{a.title}</div>
                   <div className="text-xs text-gray-500">{a.subjectName}</div>
                 </div>
-                {a.status === "pending" && session?.role === "student" && (
-                  <button
-                    onClick={() => handleCompleteAssignment(a.id)}
-                    className="text-xs px-3 py-1 bg-blue-600 text-white rounded-lg flex-shrink-0"
-                  >
-                    Done
-                  </button>
+                {a.status === "pending" && (
+                  <span className="text-xs text-blue-600 font-medium flex-shrink-0">To do</span>
                 )}
-                {a.status === "completed" && session?.role === "parent" && (
-                  <button
-                    onClick={() => handleVerifyAssignment(a.id)}
-                    className="text-xs px-3 py-1 bg-green-600 text-white rounded-lg flex-shrink-0"
-                  >
-                    Verify
-                  </button>
+                {a.status === "completed" && (
+                  <span className="text-xs text-blue-500 flex-shrink-0">Done</span>
                 )}
                 {a.status === "verified" && (
-                  <span className="text-xs text-green-600 font-medium">Verified</span>
+                  <span className="text-xs text-green-600 font-medium flex-shrink-0">Verified</span>
                 )}
               </div>
             ))}
           </div>
-        </div>
+          <p className="text-xs text-blue-600 font-medium mt-2 text-center">View all assignments →</p>
+        </button>
       )}
 
       {/* Today's Schedule */}

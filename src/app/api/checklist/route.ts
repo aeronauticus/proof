@@ -10,7 +10,7 @@ import {
   tests,
   plannerPhotos,
 } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
@@ -65,8 +65,13 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
     .select({
       sessionId: studySessions.id,
       sessionTitle: studySessions.title,
+      sessionTechnique: studySessions.technique,
+      sessionDuration: studySessions.durationMin,
+      sessionDescription: studySessions.description,
       testTitle: tests.title,
+      testDate: tests.testDate,
       subjectName: subjects.name,
+      subjectId: subjects.id,
     })
     .from(studySessions)
     .innerJoin(studyPlans, eq(studySessions.planId, studyPlans.id))
@@ -84,6 +89,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
     date: string;
     title: string;
     subjectId: number | null;
+    studySessionId: number | null;
     orderIndex: number;
     requiresParent: boolean;
   }> = [];
@@ -102,6 +108,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
           date: dateStr,
           title: `Review ${slot.subjectName} Notes`,
           subjectId: slot.subjectId,
+          studySessionId: null,
           orderIndex: orderIdx,
           requiresParent: template.requiresParent,
         });
@@ -113,6 +120,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
         date: dateStr,
         title: template.title,
         subjectId: null,
+        studySessionId: null,
         orderIndex: orderIdx,
         requiresParent: template.requiresParent,
       });
@@ -126,7 +134,8 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
       templateId: null,
       date: dateStr,
       title: `Study for ${session.subjectName} — ${session.testTitle}`,
-      subjectId: null,
+      subjectId: session.subjectId,
+      studySessionId: session.sessionId,
       orderIndex: orderIdx,
       requiresParent: false,
     });
@@ -190,8 +199,58 @@ export async function GET(req: NextRequest) {
     hasPlannerPhoto = !!plannerPhoto;
   }
 
+  // Enrich study session items with context (test date, technique, duration, description)
+  const studySessionIds = items
+    .filter((i) => i.studySessionId)
+    .map((i) => i.studySessionId as number);
+
+  const studyContextMap: Record<number, {
+    testDate: string;
+    technique: string;
+    durationMin: number;
+    description: string | null;
+    testTitle: string;
+    subjectName: string;
+  }> = {};
+
+  if (studySessionIds.length > 0) {
+    const sessionRows = await db
+      .select({
+        sessionId: studySessions.id,
+        technique: studySessions.technique,
+        durationMin: studySessions.durationMin,
+        description: studySessions.description,
+        testDate: tests.testDate,
+        testTitle: tests.title,
+        subjectName: subjects.name,
+      })
+      .from(studySessions)
+      .innerJoin(studyPlans, eq(studySessions.planId, studyPlans.id))
+      .innerJoin(tests, eq(studyPlans.testId, tests.id))
+      .innerJoin(subjects, eq(tests.subjectId, subjects.id))
+      .where(inArray(studySessions.id, studySessionIds));
+
+    for (const row of sessionRows) {
+      studyContextMap[row.sessionId] = {
+        testDate: row.testDate,
+        technique: row.technique,
+        durationMin: row.durationMin,
+        description: row.description,
+        testTitle: row.testTitle,
+        subjectName: row.subjectName,
+      };
+    }
+  }
+
+  const enrichedItems = items.map((item) => {
+    if (item.studySessionId && studyContextMap[item.studySessionId]) {
+      return { ...item, studyContext: studyContextMap[item.studySessionId] };
+    }
+    return item;
+  });
+
   return NextResponse.json({
-    items,
+    items: enrichedItems,
     isSchoolDay: schoolDay,
     hasPlannerPhoto,
   });
@@ -369,6 +428,14 @@ export async function PATCH(req: NextRequest) {
       })
       .where(eq(dailyChecklist.id, itemId));
 
+    // Sync study session completion if this checklist item is linked to one
+    if (item.studySessionId) {
+      await db
+        .update(studySessions)
+        .set({ completed: true, completedAt: new Date() })
+        .where(eq(studySessions.id, item.studySessionId));
+    }
+
     await logAction(session.userId, "complete", "checklist", itemId, null, {
       photoCount: allPaths.length,
       hasNotes: !!notes,
@@ -398,6 +465,14 @@ export async function PATCH(req: NextRequest) {
         studentConfirmedComplete: true,
       })
       .where(eq(dailyChecklist.id, itemId));
+
+    // Sync study session completion if linked
+    if (item.studySessionId) {
+      await db
+        .update(studySessions)
+        .set({ completed: true, completedAt: new Date() })
+        .where(eq(studySessions.id, item.studySessionId));
+    }
 
     await logAction(session.userId, "confirm_complete", "checklist", itemId, null, {
       overrodeAiWarning: true,

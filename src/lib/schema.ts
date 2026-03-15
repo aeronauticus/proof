@@ -70,6 +70,16 @@ export const assignments = pgTable(
       .default("pending")
       .notNull(),
     completedAt: timestamp("completed_at"),
+    photoPaths: json("photo_paths").$type<string[]>(),
+    aiHomeworkEval: json("ai_homework_eval").$type<{
+      looksLikeHomework: boolean;
+      appearsComplete: boolean;
+      missingAnswers: boolean;
+      estimatedCompletionPct: number;
+      feedback: string;
+      parentNote: string;
+    }>(),
+    studentConfirmedComplete: boolean("student_confirmed_complete").default(false),
     verifiedBy: integer("verified_by").references(() => users.id),
     verifiedAt: timestamp("verified_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -250,6 +260,7 @@ export const dailyChecklist = pgTable(
       parentNote: string;
     }>(),
     studentConfirmedComplete: boolean("student_confirmed_complete").default(false),
+    studySessionId: integer("study_session_id").references(() => studySessions.id),
     orderIndex: integer("order_index").notNull(),
     requiresParent: boolean("requires_parent").default(false).notNull(),
   },

@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import { useState, useEffect, createContext, useContext } from "react";
+import PixelLogo from "./PixelLogo";
 
 interface Session {
   userId: number;
@@ -64,7 +65,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
           <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
-            <h1 className="text-xl font-bold text-gray-900">Proof</h1>
+            <PixelLogo />
             <button
               onClick={handleSwitchProfile}
               className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
