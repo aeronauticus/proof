@@ -153,6 +153,9 @@ Respond in this exact JSON format and nothing else:
  *  to stay well within context limits with room for the system prompt. */
 const MAX_DIRECT_CHARS = 80_000;
 
+/** Cap raw text per page to avoid any single batch being too large */
+const MAX_CHARS_PER_PAGE = 3000;
+
 async function condenseBatch(
   batch: ExtractedContent[],
   batchIndex: number,
@@ -161,20 +164,24 @@ async function condenseBatch(
 ): Promise<string> {
   const batchText = batch
     .map((ec, i) => {
-      let s = `--- Page ${i + 1} ---\n${ec.rawText}`;
+      const raw = ec.rawText.length > MAX_CHARS_PER_PAGE
+        ? ec.rawText.slice(0, MAX_CHARS_PER_PAGE) + "\n[...text truncated for length]"
+        : ec.rawText;
+      let s = `--- Page ${i + 1} ---\n${raw}`;
       if (ec.highlightedText.length > 0) s += `\nHIGHLIGHTED: ${ec.highlightedText.join("; ")}`;
       if (ec.handwrittenNotes.length > 0) s += `\nNOTES: ${ec.handwrittenNotes.join("; ")}`;
       return s;
     })
     .join("\n\n");
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 3000,
-    messages: [
-      {
-        role: "user",
-        content: `You are helping a 6th grader study for a ${subjectName} test${testTopics ? ` on ${testTopics}` : ""}.
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 3000,
+      messages: [
+        {
+          role: "user",
+          content: `You are helping a 6th grader study for a ${subjectName} test${testTopics ? ` on ${testTopics}` : ""}.
 
 Below is OCR text from ${batch.length} pages of study material. Condense this into a thorough summary that preserves:
 1. ALL key facts, dates, names, definitions, and concepts
@@ -187,12 +194,20 @@ Do NOT omit details. Be thorough but eliminate only redundancy and filler.
 ${batchText}
 
 Write a structured summary (not JSON). Use headings, bullet points, and bold for key terms.`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  return `=== Material batch ${batchIndex + 1} ===\n${text}`;
+    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    return `=== Material batch ${batchIndex + 1} ===\n${text}`;
+  } catch (err) {
+    console.error(`condenseBatch ${batchIndex} failed:`, err);
+    // Fallback: just return truncated raw text so we don't lose everything
+    const fallback = batch
+      .map((ec) => ec.rawText.slice(0, 500))
+      .join("\n");
+    return `=== Material batch ${batchIndex + 1} (condensation failed, raw excerpt) ===\n${fallback}`;
+  }
 }
 
 // ── Function 2: Generate study guide + practice quiz from all materials ───────
@@ -301,13 +316,23 @@ export async function generateStudyGuide(
     }
   }
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4000,
-    messages: [
-      {
-        role: "user",
-        content: `You are creating a study guide for a 6th grader preparing for a ${subjectName} ${testTitle}${testTopics ? ` covering ${testTopics}` : ""}.
+  // Safety cap: if condensed text is still too large, truncate
+  if (materialsSummary.length > 120_000) {
+    console.warn(`Condensed summary still large (${materialsSummary.length} chars). Truncating to 120k.`);
+    materialsSummary = materialsSummary.slice(0, 120_000) + "\n\n[...remaining material truncated for length]";
+  }
+
+  console.log(`generateStudyGuide: ${extractedContents.length} pages, final prompt ~${materialsSummary.length} chars`);
+
+  let text = "";
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 16000,
+      messages: [
+        {
+          role: "user",
+          content: `You are creating a study guide for a 6th grader preparing for a ${subjectName} ${testTitle}${testTopics ? ` covering ${testTopics}` : ""}.
 
 Here is ALL the material the student uploaded (OCR text from photos of textbooks, handouts, and notes):
 
@@ -323,19 +348,17 @@ When creating practice quiz questions, deliberately include MORE questions targe
 
 Also create 8-12 practice quiz questions that test real understanding (not just memorization). Mix multiple choice and free response. Include easy, medium, and hard questions.
 
-Respond in this exact JSON format and nothing else:
+IMPORTANT: Respond ONLY with valid JSON, no markdown code fences, no extra text. Use this exact structure:
 {
   "content": {
     "keyConcepts": [
-      {"concept": "<concept name>", "explanation": "<clear, simple explanation a 6th grader can understand>"},
-      ...
+      {"concept": "<concept name>", "explanation": "<clear, simple explanation a 6th grader can understand>"}
     ],
     "vocabulary": [
-      {"term": "<term>", "definition": "<simple definition>"},
-      ...
+      {"term": "<term>", "definition": "<simple definition>"}
     ],
-    "importantFacts": ["<fact 1>", "<fact 2>", ...],
-    "highlightedPriorities": ["<things the student highlighted or marked as important>", ...],
+    "importantFacts": ["<fact 1>", "<fact 2>"],
+    "highlightedPriorities": ["<things the student highlighted or marked as important>"],
     "summary": "<2-4 paragraph summary of everything the student needs to know, written simply>"
   },
   "practiceQuiz": [
@@ -343,37 +366,41 @@ Respond in this exact JSON format and nothing else:
       "question": "<question text>",
       "choices": ["A) ...", "B) ...", "C) ...", "D) ..."],
       "expectedAnswer": "<correct answer — for MC include the letter, for free response write a good answer>",
-      "difficulty": "easy" or "medium" or "hard",
-      "sourceHint": "<where in the material this came from, e.g. 'From the section about photosynthesis'>"
+      "difficulty": "easy",
+      "sourceHint": "<where in the material this came from>"
     },
     {
       "question": "<free response question — no choices field>",
       "expectedAnswer": "<what a good answer includes>",
       "difficulty": "medium",
       "sourceHint": "<source hint>"
-    },
-    ...
+    }
   ]
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+    text = response.content[0].type === "text" ? response.content[0].text : "";
+    console.log(`generateStudyGuide: API returned ${text.length} chars, stop_reason=${response.stop_reason}`);
+
+    if (response.stop_reason === "max_tokens") {
+      console.warn("generateStudyGuide: response was truncated (hit max_tokens). Attempting to salvage partial JSON...");
+    }
+  } catch (err) {
+    console.error("generateStudyGuide API call failed:", err);
+    throw err; // Let caller handle — don't silently return fallback
+  }
 
   const result = parseJson<{
     content: StudyGuideContent;
     practiceQuiz: PracticeQuizQuestion[];
-  }>(text, {
-    content: {
-      keyConcepts: [],
-      vocabulary: [],
-      importantFacts: [],
-      highlightedPriorities: [],
-      summary: "Could not generate study guide. Try uploading clearer photos.",
-    },
-    practiceQuiz: [],
-  });
+  }>(text, null as unknown as { content: StudyGuideContent; practiceQuiz: PracticeQuizQuestion[] });
+
+  if (!result || !result.content || !result.content.summary) {
+    console.error("generateStudyGuide: Failed to parse response. First 500 chars:", text.slice(0, 500));
+    throw new Error("AI returned invalid study guide format");
+  }
 
   return result;
 }

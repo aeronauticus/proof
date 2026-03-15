@@ -171,6 +171,7 @@ function TestDetailContent() {
   const [generatingGuide, setGeneratingGuide] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
   const [previewMaterial, setPreviewMaterial] = useState<StudyMaterial | null>(null);
+  const [guideError, setGuideError] = useState<string | null>(null);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -278,6 +279,7 @@ function TestDetailContent() {
 
   async function handleGenerateGuide() {
     setGeneratingGuide(true);
+    setGuideError(null);
     try {
       const res = await fetch(`/api/tests/${test!.id}/materials`, {
         method: "PATCH",
@@ -285,8 +287,12 @@ function TestDetailContent() {
       if (res.ok) {
         await loadTest();
         setShowGuide(true);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setGuideError(data.error || `Failed (${res.status})`);
       }
     } catch (err) {
+      setGuideError("Network error — try again");
       console.error("Guide generation failed:", err);
     }
     setGeneratingGuide(false);
@@ -591,6 +597,11 @@ function TestDetailContent() {
                         ? `Regenerate Study Guide & Quiz (${readableCount} readable photos)`
                         : `Done Uploading — Generate Study Guide (${readableCount} photos)`}
                   </button>
+                  {guideError && (
+                    <p className="mt-2 text-sm text-red-600 font-medium text-center">
+                      {guideError}
+                    </p>
+                  )}
                 </>
               );
             })()}

@@ -438,9 +438,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       test.title
     );
   } catch (err) {
-    console.error("Study guide generation failed:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Study guide generation failed:", message, err);
     return NextResponse.json(
-      { error: "Failed to generate study guide" },
+      { error: `Failed to generate study guide: ${message}` },
       { status: 500 }
     );
   }
