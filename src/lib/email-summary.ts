@@ -28,11 +28,19 @@ function getParentEmails(): string[] {
     .filter((e) => e.length > 0);
 }
 
+interface HomeworkAiAlert {
+  feedback: string;
+  parentNote: string;
+  estimatedCompletionPct: number;
+  studentConfirmed: boolean;
+}
+
 interface DaySummaryData {
   date: string;
   plannerPhotoUploaded: boolean;
   checklist: { total: number; completed: number; verified: number };
   assignments: { total: number; completed: number; overdue: number };
+  homeworkAiAlerts: HomeworkAiAlert[];
   notesReport: Array<{
     subject: string;
     evaluation: string;
@@ -101,6 +109,22 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
   const overdueAssignments = todayAssignments.filter(
     (a) => a.status === "pending"
   ).length;
+
+  // Homework AI alerts
+  const homeworkAiAlerts: HomeworkAiAlert[] = checklistItems
+    .filter((c) => {
+      const eval_ = c.aiHomeworkEval as HomeworkAiAlert | null;
+      return eval_ && (eval_.estimatedCompletionPct < 100 || eval_.parentNote);
+    })
+    .map((c) => {
+      const eval_ = c.aiHomeworkEval as { feedback: string; parentNote: string; estimatedCompletionPct: number; missingAnswers?: boolean; appearsComplete?: boolean };
+      return {
+        feedback: eval_.feedback,
+        parentNote: eval_.parentNote,
+        estimatedCompletionPct: eval_.estimatedCompletionPct,
+        studentConfirmed: !!(c.studentConfirmedComplete),
+      };
+    });
 
   // Notes report
   const todayNotes = await db
@@ -227,6 +251,7 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
       completed: assignmentsCompleted,
       overdue: overdueAssignments,
     },
+    homeworkAiAlerts,
     notesReport,
     newScores,
     corrections,
@@ -289,6 +314,21 @@ function buildEmailHtml(data: DaySummaryData): string {
     <h3 style="margin-bottom: 4px;">Checklist</h3>
     <p style="margin: 0;"><span style="color: ${checkColor}; font-weight: 600;">${data.checklist.completed}/${data.checklist.total}</span> completed (${checkPct}%) · ${data.checklist.verified} verified by parent</p>
   </div>`;
+
+  // Homework AI Alerts
+  if (data.homeworkAiAlerts.length > 0) {
+    html += `<div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+      <h3 style="color: ${warningColor}; margin: 0 0 8px 0;">Homework Review (AI)</h3>`;
+    for (const alert of data.homeworkAiAlerts) {
+      html += `<p style="margin: 4px 0; font-size: 14px;">${alert.parentNote}</p>`;
+      html += `<p style="margin: 2px 0; font-size: 12px; color: ${grayColor};">Estimated completion: ${alert.estimatedCompletionPct}%`;
+      if (alert.studentConfirmed) {
+        html += ` — <span style="color: ${warningColor}; font-weight: 600;">Jack confirmed complete despite warning</span>`;
+      }
+      html += `</p>`;
+    }
+    html += `</div>`;
+  }
 
   // Assignments
   if (data.assignments.total > 0) {

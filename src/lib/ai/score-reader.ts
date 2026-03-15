@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { UPLOAD_BASE } from "@/lib/uploads";
 
 const anthropic = new Anthropic();
 
@@ -18,7 +19,8 @@ interface ScoreResult {
 export async function readScoreFromPhoto(
   photoPath: string
 ): Promise<ScoreResult> {
-  const fullPath = join(process.cwd(), "public", photoPath);
+  const relativePath = photoPath.replace(/^\/uploads\//, "");
+  const fullPath = join(UPLOAD_BASE, relativePath);
   const imageBuffer = await readFile(fullPath);
   const base64 = imageBuffer.toString("base64");
 

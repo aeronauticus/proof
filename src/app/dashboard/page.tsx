@@ -2,6 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import Lightbox from "@/components/ui/Lightbox";
+
+interface AiHomeworkEval {
+  looksLikeHomework: boolean;
+  appearsComplete: boolean;
+  missingAnswers: boolean;
+  estimatedCompletionPct: number;
+  feedback: string;
+  parentNote: string;
+}
 
 interface ChecklistItem {
   id: number;
@@ -15,6 +25,8 @@ interface ChecklistItem {
   orderIndex: number;
   notes: string | null;
   photoPaths: string[] | null;
+  aiHomeworkEval: AiHomeworkEval | null;
+  studentConfirmedComplete: boolean;
 }
 
 interface ScheduleSlot {
@@ -67,31 +79,77 @@ function daysSince(dateStr: string): number {
   return -daysUntil(dateStr);
 }
 
+/** Clickable photo thumbnails that open a lightbox */
+function PhotoThumbnails({
+  photos,
+  size = "h-24 w-24",
+  className = "",
+}: {
+  photos: string[];
+  size?: string;
+  className?: string;
+}) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  if (!photos || photos.length === 0) return null;
+
+  return (
+    <>
+      <div className={`flex gap-2 overflow-x-auto ${className}`}>
+        {photos.map((path, i) => (
+          <img
+            key={i}
+            src={path}
+            alt={`Photo ${i + 1}`}
+            className={`rounded-lg border border-gray-200 ${size} object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity`}
+            onClick={() => { setLightboxIndex(i); setLightboxOpen(true); }}
+          />
+        ))}
+      </div>
+      {lightboxOpen && (
+        <Lightbox
+          photos={photos}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 function ChecklistRow({
   item,
   hasPlannerPhoto,
   onToggle,
   onAddPhoto,
   onCompleteHomework,
+  onConfirmComplete,
   onReadingNotes,
 }: {
   item: ChecklistItem;
   hasPlannerPhoto: boolean;
   onToggle: (id: number) => void;
   onAddPhoto: (id: number, file: File) => Promise<void>;
-  onCompleteHomework: (id: number) => void;
+  onCompleteHomework: (id: number) => Promise<{ needsConfirmation?: boolean; aiHomeworkEval?: AiHomeworkEval } | null>;
+  onConfirmComplete: (id: number) => void;
   onReadingNotes: (id: number, notes: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [readingText, setReadingText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [aiWarning, setAiWarning] = useState<AiHomeworkEval | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isHomework = item.title === "Homework";
   const isReading = item.title === "Reading / Memory Work";
   const needsProof = isHomework || isReading;
   const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
+
+  // Show AI warning state (photos uploaded but AI flagged issues, not yet completed)
+  const hasPendingAiWarning = isHomework && !item.completed && item.aiHomeworkEval &&
+    (item.aiHomeworkEval.missingAnswers || !item.aiHomeworkEval.appearsComplete || !item.aiHomeworkEval.looksLikeHomework);
 
   // Completed items — show proof if it exists
   if (item.completed) {
@@ -115,12 +173,12 @@ function ChecklistRow({
           )}
         </div>
         {/* Show proof inline */}
-        {item.photoPaths && item.photoPaths.length > 0 && (
-          <div className="mt-2 flex gap-2 overflow-x-auto">
-            {item.photoPaths.map((path, i) => (
-              <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-24 w-24 object-cover flex-shrink-0" />
-            ))}
-          </div>
+        <PhotoThumbnails photos={item.photoPaths || []} className="mt-2" />
+        {/* AI warning badge if student confirmed despite warning */}
+        {item.studentConfirmedComplete && item.aiHomeworkEval && (
+          <p className="mt-1 text-[11px] text-amber-600 bg-amber-50 rounded px-2 py-1">
+            AI flagged: {item.aiHomeworkEval.feedback}
+          </p>
         )}
         {item.notes && isReading && (
           <p className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">{item.notes}</p>
@@ -130,8 +188,7 @@ function ChecklistRow({
   }
 
   // Not completed — handle different item types
-  if (needsProof && !expanded) {
-    // Show as tappable row that expands
+  if (needsProof && !expanded && !hasPendingAiWarning) {
     return (
       <button
         onClick={() => setExpanded(true)}
@@ -151,6 +208,51 @@ function ChecklistRow({
     );
   }
 
+  // AI Warning state — show warning and confirm button
+  if (hasPendingAiWarning) {
+    const eval_ = item.aiHomeworkEval!;
+    return (
+      <div className="px-4 py-3 space-y-2 bg-amber-50/50">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 rounded-full border-2 border-amber-400 flex-shrink-0 flex items-center justify-center">
+            <span className="text-amber-500 text-xs font-bold">!</span>
+          </div>
+          <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
+        </div>
+        <div className="ml-8 p-3 bg-amber-100 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-900 font-medium mb-1">
+            {!eval_.looksLikeHomework
+              ? "This doesn't look like homework."
+              : eval_.missingAnswers
+                ? "It looks like some answers might be missing."
+                : "The homework may not be fully complete."}
+          </p>
+          <p className="text-xs text-amber-800">{eval_.feedback}</p>
+          <p className="text-xs text-amber-700 mt-1">
+            Estimated completion: {eval_.estimatedCompletionPct}%
+          </p>
+        </div>
+        <PhotoThumbnails photos={item.photoPaths || []} size="h-16 w-16" className="ml-8" />
+        <div className="ml-8 flex gap-2">
+          <button
+            onClick={() => setExpanded(true)}
+            className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
+          >
+            Add More Photos
+          </button>
+          <button
+            onClick={() => {
+              onConfirmComplete(item.id);
+            }}
+            className="px-3 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
+          >
+            I Finished Everything
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (isHomework && expanded) {
     const photos = item.photoPaths || [];
     return (
@@ -166,11 +268,11 @@ function ChecklistRow({
             : `${photos.length} photo${photos.length > 1 ? "s" : ""} uploaded. Add more or tap Done.`}
         </p>
         {/* Thumbnails of uploaded photos */}
-        {photos.length > 0 && (
-          <div className="ml-8 flex gap-2 overflow-x-auto">
-            {photos.map((path, i) => (
-              <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-20 w-20 object-cover flex-shrink-0" />
-            ))}
+        <PhotoThumbnails photos={photos} size="h-20 w-20" className="ml-8" />
+        {/* AI warning from a previous attempt */}
+        {aiWarning && (
+          <div className="ml-8 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-xs text-amber-800 font-medium">{aiWarning.feedback}</p>
           </div>
         )}
         <input
@@ -185,7 +287,6 @@ function ChecklistRow({
             setUploading(true);
             await onAddPhoto(item.id, file);
             setUploading(false);
-            // Reset input so same file can be re-selected
             if (fileRef.current) fileRef.current.value = "";
           }}
         />
@@ -203,13 +304,21 @@ function ChecklistRow({
           </button>
           {photos.length > 0 && (
             <button
-              onClick={() => {
-                onCompleteHomework(item.id);
-                setExpanded(false);
+              onClick={async () => {
+                setSubmitting(true);
+                const result = await onCompleteHomework(item.id);
+                setSubmitting(false);
+                if (result?.needsConfirmation && result.aiHomeworkEval) {
+                  setAiWarning(result.aiHomeworkEval);
+                  // Don't collapse — the parent will re-render with hasPendingAiWarning
+                } else {
+                  setExpanded(false);
+                }
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+              disabled={submitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              Done
+              {submitting ? "Checking..." : "Done"}
             </button>
           )}
         </div>
@@ -250,7 +359,7 @@ function ChecklistRow({
     );
   }
 
-  // Default: simple toggle items (Organization, End-of-Day, Review Notes, Study sessions)
+  // Default: simple toggle items
   return (
     <button
       onClick={() => !isBlocked && onToggle(item.id)}
@@ -357,10 +466,24 @@ function DashboardContent() {
   }
 
   async function handleCompleteHomework(itemId: number) {
-    await fetch("/api/checklist", {
+    const res = await fetch("/api/checklist", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, action: "complete" }),
+    });
+    const data = await res.json();
+    await loadData();
+    if (data.needsConfirmation) {
+      return { needsConfirmation: true, aiHomeworkEval: data.aiHomeworkEval };
+    }
+    return null;
+  }
+
+  async function handleConfirmComplete(itemId: number) {
+    await fetch("/api/checklist", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, action: "confirm_complete" }),
     });
     loadData();
   }
@@ -430,10 +553,6 @@ function DashboardContent() {
 
   // ── Parent View ──────────────────────────────────────────────────────────
   if (session?.role === "parent") {
-    const testsNeedingReview = upcomingTests.filter(
-      (t) => t.status === "returned" && !t.photoPath
-    );
-
     return (
       <div className="space-y-6">
         <div className="text-center">
@@ -581,11 +700,15 @@ function DashboardContent() {
                   )}
                 </div>
                 {/* Show proof submitted by Jack */}
-                {item.photoPaths && item.photoPaths.length > 0 && (
-                  <div className="mt-2 ml-8 flex gap-2 overflow-x-auto">
-                    {item.photoPaths.map((path, i) => (
-                      <img key={i} src={path} alt={`Homework ${i + 1}`} className="rounded-lg border border-gray-200 h-28 w-28 object-cover flex-shrink-0" />
-                    ))}
+                <PhotoThumbnails photos={item.photoPaths || []} size="h-28 w-28" className="mt-2 ml-8" />
+                {/* AI homework evaluation alert for parent */}
+                {item.aiHomeworkEval && (item.aiHomeworkEval.missingAnswers || !item.aiHomeworkEval.appearsComplete) && (
+                  <div className="mt-2 ml-8 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs font-medium text-amber-800">AI Review:</p>
+                    <p className="text-xs text-amber-700">{item.aiHomeworkEval.parentNote}</p>
+                    {item.studentConfirmedComplete && (
+                      <p className="text-xs text-amber-600 mt-1 font-medium">Jack confirmed this was complete despite the warning.</p>
+                    )}
                   </div>
                 )}
                 {item.notes && item.title === "Reading / Memory Work" && (
@@ -638,7 +761,7 @@ function DashboardContent() {
         )}
       </div>
 
-      {/* Overdue Tests Alert — always at top */}
+      {/* Overdue Tests Alert */}
       {overdueTests.length > 0 && (
         <div className="bg-red-50 border-2 border-red-300 rounded-xl p-3">
           <h3 className="font-bold text-red-800 text-sm mb-1">
@@ -653,7 +776,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ═══ STEP 1: Planner Photo (school days only) ═══ */}
+      {/* Step 1: Planner Photo (school days only) */}
       {isSchoolDay && (
       <div className={`rounded-xl p-4 border-2 ${
         hasPlannerPhoto
@@ -693,7 +816,7 @@ function DashboardContent() {
       </div>
       )}
 
-      {/* ═══ STEP 2: Daily Checklist (every day — shorter on weekends) ═══ */}
+      {/* Step 2: Daily Checklist */}
       {hasChecklist && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
@@ -725,6 +848,7 @@ function DashboardContent() {
               onToggle={handleChecklistToggle}
               onAddPhoto={handleAddPhoto}
               onCompleteHomework={handleCompleteHomework}
+              onConfirmComplete={handleConfirmComplete}
               onReadingNotes={handleReadingNotes}
             />
           ))}
@@ -811,7 +935,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Today's Schedule (collapsed, less prominent) */}
+      {/* Today's Schedule */}
       {schedule.length > 0 && (
         <div className="bg-white rounded-xl p-4 border border-gray-200">
           <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-2">

@@ -18,6 +18,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { uploadDir as getUploadDir, uploadUrl } from "@/lib/uploads";
+import { evaluateHomeworkPhotos } from "@/lib/ai/homework-evaluator";
 
 /**
  * Generate the daily checklist for a given date.
@@ -328,6 +329,35 @@ export async function PATCH(req: NextRequest) {
     const existingPaths = (item.photoPaths as string[] | null) || [];
     const allPaths = [...existingPaths, ...newPaths];
 
+    // AI evaluation for homework photos
+    let aiHomeworkEval = null;
+    if (item.title === "Homework" && allPaths.length > 0) {
+      try {
+        aiHomeworkEval = await evaluateHomeworkPhotos(allPaths);
+      } catch (err) {
+        console.error("Homework AI evaluation failed:", err);
+      }
+    }
+
+    // If AI flags missing answers, don't auto-complete — require confirmation
+    if (aiHomeworkEval && (aiHomeworkEval.missingAnswers || !aiHomeworkEval.appearsComplete || !aiHomeworkEval.looksLikeHomework)) {
+      await db
+        .update(dailyChecklist)
+        .set({
+          photoPaths: allPaths,
+          aiHomeworkEval,
+          notes: notes || item.notes,
+        })
+        .where(eq(dailyChecklist.id, itemId));
+
+      return NextResponse.json({
+        ok: false,
+        needsConfirmation: true,
+        aiHomeworkEval,
+        photoPaths: allPaths,
+      });
+    }
+
     await db
       .update(dailyChecklist)
       .set({
@@ -335,15 +365,46 @@ export async function PATCH(req: NextRequest) {
         completedAt: new Date(),
         notes: notes || item.notes,
         photoPaths: allPaths.length > 0 ? allPaths : item.photoPaths,
+        aiHomeworkEval,
       })
       .where(eq(dailyChecklist.id, itemId));
 
     await logAction(session.userId, "complete", "checklist", itemId, null, {
       photoCount: allPaths.length,
       hasNotes: !!notes,
+      aiHomeworkEval,
     });
 
-    return NextResponse.json({ ok: true, photoPaths: allPaths });
+    return NextResponse.json({ ok: true, photoPaths: allPaths, aiHomeworkEval });
+  }
+
+  // Action: confirm_complete — Jack confirms homework is done despite AI warning
+  if (action === "confirm_complete") {
+    const item = await db
+      .select()
+      .from(dailyChecklist)
+      .where(eq(dailyChecklist.id, itemId))
+      .then((rows) => rows[0]);
+
+    if (!item) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+
+    await db
+      .update(dailyChecklist)
+      .set({
+        completed: true,
+        completedAt: new Date(),
+        studentConfirmedComplete: true,
+      })
+      .where(eq(dailyChecklist.id, itemId));
+
+    await logAction(session.userId, "confirm_complete", "checklist", itemId, null, {
+      overrodeAiWarning: true,
+      aiHomeworkEval: item.aiHomeworkEval,
+    });
+
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "verify") {

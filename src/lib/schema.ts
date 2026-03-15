@@ -241,6 +241,15 @@ export const dailyChecklist = pgTable(
     verifiedAt: timestamp("verified_at"),
     notes: text("notes"),
     photoPaths: json("photo_paths").$type<string[]>(),
+    aiHomeworkEval: json("ai_homework_eval").$type<{
+      looksLikeHomework: boolean;
+      appearsComplete: boolean;
+      missingAnswers: boolean;
+      estimatedCompletionPct: number;
+      feedback: string;
+      parentNote: string;
+    }>(),
+    studentConfirmedComplete: boolean("student_confirmed_complete").default(false),
     orderIndex: integer("order_index").notNull(),
     requiresParent: boolean("requires_parent").default(false).notNull(),
   },
