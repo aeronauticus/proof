@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
