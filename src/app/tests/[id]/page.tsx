@@ -1106,6 +1106,7 @@ function PracticeQuiz({
     score: number;
   }> | null>(null);
   const [overallScore, setOverallScore] = useState(0);
+  const [hasMorePractice, setHasMorePractice] = useState(false);
 
   const q = questions[currentIndex] || null;
   const isLast = currentIndex === questions.length - 1;
@@ -1169,6 +1170,7 @@ function PracticeQuiz({
       if (data.ok) {
         setResults(data.results);
         setOverallScore(data.overallScore);
+        setHasMorePractice(!!data.hasMorePracticeSessions);
       }
     } catch (err) {
       console.error("Quiz submission failed:", err);
@@ -1244,10 +1246,22 @@ function PracticeQuiz({
           })}
         </div>
 
-        <div className="p-4">
+        <div className="p-4 space-y-2">
+          {hasMorePractice && (
+            <button
+              onClick={onClose}
+              className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700"
+            >
+              Take Next Practice Quiz
+            </button>
+          )}
           <button
             onClick={onClose}
-            className="w-full py-3 bg-purple-600 text-white font-medium rounded-xl hover:bg-purple-700"
+            className={`w-full py-3 font-medium rounded-xl ${
+              hasMorePractice
+                ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                : "bg-purple-600 text-white hover:bg-purple-700"
+            }`}
           >
             Done
           </button>

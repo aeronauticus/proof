@@ -586,3 +586,102 @@ Respond in this exact JSON format and nothing else (an array with one object per
 
   return results;
 }
+
+// ── Function 5: Generate a NEW practice quiz based on weak areas ─────────────
+
+export async function regeneratePracticeQuiz(
+  guideContent: StudyGuideContent,
+  previousQuestions: PracticeQuizQuestion[],
+  wrongAnswers: Array<{
+    question: string;
+    studentAnswer: string;
+    expectedAnswer: string;
+    feedback: string;
+  }>,
+  allHighlights: string[],
+  allNotes: string[],
+  subjectName: string,
+  testTopics: string | null,
+  attemptNumber: number
+): Promise<PracticeQuizQuestion[]> {
+  // Build context prioritized: wrong answers > notes > highlights > general guide
+  const parts: string[] = [];
+
+  if (wrongAnswers.length > 0) {
+    parts.push("HIGHEST PRIORITY — Questions the student got WRONG (make similar questions on these topics):");
+    for (const w of wrongAnswers) {
+      parts.push(`  Q: "${w.question}"`);
+      parts.push(`  Student answered: "${w.studentAnswer}" — Correct: "${w.expectedAnswer}"`);
+      if (w.feedback) parts.push(`  Feedback: ${w.feedback}`);
+      parts.push("");
+    }
+  }
+
+  if (allNotes.length > 0) {
+    parts.push("HIGH PRIORITY — Student's handwritten notes (test on these topics):");
+    for (const n of allNotes.slice(0, 20)) {
+      parts.push(`  - ${n}`);
+    }
+    parts.push("");
+  }
+
+  if (allHighlights.length > 0) {
+    parts.push("IMPORTANT — Text the student highlighted (include questions on these):");
+    for (const h of allHighlights.slice(0, 20)) {
+      parts.push(`  - ${h}`);
+    }
+    parts.push("");
+  }
+
+  parts.push("STUDY GUIDE CONTENT:");
+  parts.push(`Key concepts: ${guideContent.keyConcepts.map((c) => `${c.concept}: ${c.explanation}`).join("; ")}`);
+  parts.push(`Vocabulary: ${guideContent.vocabulary.map((v) => `${v.term}: ${v.definition}`).join("; ")}`);
+  parts.push(`Important facts: ${guideContent.importantFacts.join("; ")}`);
+  parts.push(`Summary: ${guideContent.summary}`);
+
+  const previousQList = previousQuestions.map((q) => q.question).join("\n  - ");
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 8000,
+    messages: [
+      {
+        role: "user",
+        content: `You are creating practice quiz #${attemptNumber + 1} for a 6th grader studying for a ${subjectName} test${testTopics ? ` on ${testTopics}` : ""}.
+
+${parts.join("\n")}
+
+PREVIOUS QUESTIONS (do NOT repeat these — ask about the same topics in DIFFERENT ways):
+  - ${previousQList}
+
+Create 10-12 NEW practice questions. Rules:
+1. At least half the questions MUST target topics the student got wrong — ask similar concepts differently
+2. Include questions about the student's notes and highlighted material
+3. Cover different parts of the study guide than the previous quiz
+4. Mix multiple choice (with 4 choices) and free response
+5. Include easy, medium, and hard questions
+6. Make questions test real understanding, not just memorization
+
+IMPORTANT: Respond ONLY with a valid JSON array, no markdown code fences:
+[
+  {
+    "question": "<question text>",
+    "choices": ["A) ...", "B) ...", "C) ...", "D) ..."],
+    "expectedAnswer": "<correct answer>",
+    "difficulty": "easy",
+    "sourceHint": "<where this came from>"
+  },
+  {
+    "question": "<free response — no choices field>",
+    "expectedAnswer": "<good answer>",
+    "difficulty": "medium",
+    "sourceHint": "<source>"
+  }
+]`,
+      },
+    ],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  return parseJson<PracticeQuizQuestion[]>(text, []);
+}
