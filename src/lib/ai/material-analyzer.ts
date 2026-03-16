@@ -147,66 +147,50 @@ Respond in this exact JSON format and nothing else:
   });
 }
 
-// ── Helper: Condense a batch of materials into a summary ──────────────────────
+// ── Helper: Condense materials into summaries ────────────────────────────────
 
-/** Rough character count ≈ tokens * 4. Keep final prompt under ~150k chars
- *  to stay well within context limits with room for the system prompt. */
-const MAX_DIRECT_CHARS = 80_000;
+/** Send raw text directly if under this limit */
+const MAX_DIRECT_CHARS = 40_000;
+/** Cap raw text per page to avoid huge single pages */
+const MAX_CHARS_PER_PAGE = 2000;
+/** Target for the final combined summary sent to guide generation */
+const MAX_FINAL_PROMPT_CHARS = 60_000;
 
-/** Cap raw text per page to avoid any single batch being too large */
-const MAX_CHARS_PER_PAGE = 3000;
-
-async function condenseBatch(
-  batch: ExtractedContent[],
-  batchIndex: number,
+async function condenseText(
+  text: string,
+  label: string,
   subjectName: string,
-  testTopics: string | null
+  testTopics: string | null,
+  maxTokens: number = 1500
 ): Promise<string> {
-  const batchText = batch
-    .map((ec, i) => {
-      const raw = ec.rawText.length > MAX_CHARS_PER_PAGE
-        ? ec.rawText.slice(0, MAX_CHARS_PER_PAGE) + "\n[...text truncated for length]"
-        : ec.rawText;
-      let s = `--- Page ${i + 1} ---\n${raw}`;
-      if (ec.highlightedText.length > 0) s += `\nHIGHLIGHTED: ${ec.highlightedText.join("; ")}`;
-      if (ec.handwrittenNotes.length > 0) s += `\nNOTES: ${ec.handwrittenNotes.join("; ")}`;
-      return s;
-    })
-    .join("\n\n");
-
   try {
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 3000,
+      max_tokens: maxTokens,
       messages: [
         {
           role: "user",
           content: `You are helping a 6th grader study for a ${subjectName} test${testTopics ? ` on ${testTopics}` : ""}.
 
-Below is OCR text from ${batch.length} pages of study material. Condense this into a thorough summary that preserves:
-1. ALL key facts, dates, names, definitions, and concepts
-2. ALL highlighted text and student notes VERBATIM — these are the student's priorities
-3. Any vocabulary terms with definitions
-4. Important cause-and-effect relationships
+Condense this study material into a focused summary. Preserve:
+- ALL key facts, dates, names, vocabulary definitions, and concepts
+- ALL highlighted text and student notes VERBATIM
+- Cause-and-effect relationships
 
-Do NOT omit details. Be thorough but eliminate only redundancy and filler.
+Remove only redundancy, filler, and repeated content. Be concise but thorough.
 
-${batchText}
+${text}
 
-Write a structured summary (not JSON). Use headings, bullet points, and bold for key terms.`,
+Write a structured summary with bullet points. No JSON.`,
         },
       ],
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
-    return `=== Material batch ${batchIndex + 1} ===\n${text}`;
+    return response.content[0].type === "text" ? response.content[0].text : "";
   } catch (err) {
-    console.error(`condenseBatch ${batchIndex} failed:`, err);
-    // Fallback: just return truncated raw text so we don't lose everything
-    const fallback = batch
-      .map((ec) => ec.rawText.slice(0, 500))
-      .join("\n");
-    return `=== Material batch ${batchIndex + 1} (condensation failed, raw excerpt) ===\n${fallback}`;
+    console.error(`condensation failed (${label}):`, err);
+    // Fallback: return first 1000 chars of input
+    return text.slice(0, 1000) + "\n[...condensation failed, excerpt only]";
   }
 }
 
@@ -219,7 +203,7 @@ export async function generateStudyGuide(
   testTitle: string,
   pastPerformance?: PastPerformance
 ): Promise<{ content: StudyGuideContent; practiceQuiz: PracticeQuizQuestion[] }> {
-  // Collect all highlighted text and notes first — these are always included verbatim
+  // Collect all highlighted text and notes — always included verbatim
   const allHighlights: string[] = [];
   const allNotes: string[] = [];
   for (const ec of extractedContents) {
@@ -227,54 +211,65 @@ export async function generateStudyGuide(
     allNotes.push(...ec.handwrittenNotes);
   }
 
-  // Build a combined text summary of all materials
-  let materialsSummary: string;
+  // Build per-page text, capped per page
+  const pageTexts = extractedContents.map((ec, i) => {
+    const raw = ec.rawText.length > MAX_CHARS_PER_PAGE
+      ? ec.rawText.slice(0, MAX_CHARS_PER_PAGE)
+      : ec.rawText;
+    let s = `--- Page ${i + 1} (${ec.sourceType}) ---\n${raw}`;
+    if (ec.highlightedText.length > 0) s += `\nHIGHLIGHTED: ${ec.highlightedText.join("; ")}`;
+    if (ec.handwrittenNotes.length > 0) s += `\nNOTES: ${ec.handwrittenNotes.join("; ")}`;
+    return s;
+  });
 
-  // Check total text size
-  const fullText = extractedContents.map((ec) => ec.rawText).join("\n");
-  const totalChars = fullText.length;
+  const totalChars = pageTexts.join("\n").length;
+  let materialsSummary: string;
 
   if (totalChars <= MAX_DIRECT_CHARS) {
     // Small enough to send directly
-    materialsSummary = extractedContents
-      .map((ec, i) => {
-        let section = `--- Material ${i + 1} (${ec.sourceType}) ---\n${ec.rawText}`;
-        if (ec.highlightedText.length > 0) {
-          section += `\n\nHIGHLIGHTED BY STUDENT: ${ec.highlightedText.join("; ")}`;
-        }
-        if (ec.handwrittenNotes.length > 0) {
-          section += `\nSTUDENT'S NOTES: ${ec.handwrittenNotes.join("; ")}`;
-        }
-        return section;
-      })
-      .join("\n\n");
+    materialsSummary = pageTexts.join("\n\n");
   } else {
-    // Too large — condense in batches of 10 pages, then combine
-    console.log(`Materials too large (${totalChars} chars / ${extractedContents.length} pages). Condensing in batches...`);
-    const BATCH_SIZE = 10;
-    const batches: ExtractedContent[][] = [];
-    for (let i = 0; i < extractedContents.length; i += BATCH_SIZE) {
-      batches.push(extractedContents.slice(i, i + BATCH_SIZE));
+    // Condense in batches of 5 pages, run 5 in parallel
+    console.log(`Materials: ${totalChars} chars / ${extractedContents.length} pages. Condensing...`);
+    const BATCH_SIZE = 5;
+    const batches: string[][] = [];
+    for (let i = 0; i < pageTexts.length; i += BATCH_SIZE) {
+      batches.push(pageTexts.slice(i, i + BATCH_SIZE));
     }
 
-    // Run batches in parallel (up to 3 concurrent) for speed
     const summaries: string[] = [];
-    for (let i = 0; i < batches.length; i += 3) {
-      const chunk = batches.slice(i, i + 3);
+    for (let i = 0; i < batches.length; i += 5) {
+      const chunk = batches.slice(i, i + 5);
       const results = await Promise.all(
-        chunk.map((batch, j) => condenseBatch(batch, i + j, subjectName, testTopics))
+        chunk.map((batch, j) =>
+          condenseText(batch.join("\n\n"), `batch ${i + j + 1}`, subjectName, testTopics, 1500)
+        )
       );
       summaries.push(...results);
     }
 
     materialsSummary = summaries.join("\n\n");
+    console.log(`After first condensation: ${materialsSummary.length} chars from ${batches.length} batches`);
 
-    // Append all highlights and notes verbatim so the final pass always sees them
+    // If still too large, do a second condensation pass
+    if (materialsSummary.length > MAX_FINAL_PROMPT_CHARS) {
+      console.log(`Still too large. Running second condensation pass...`);
+      // Split condensed summaries into 2 halves and condense each
+      const mid = Math.ceil(summaries.length / 2);
+      const [first, second] = await Promise.all([
+        condenseText(summaries.slice(0, mid).join("\n\n"), "final-1", subjectName, testTopics, 2000),
+        condenseText(summaries.slice(mid).join("\n\n"), "final-2", subjectName, testTopics, 2000),
+      ]);
+      materialsSummary = first + "\n\n" + second;
+      console.log(`After second condensation: ${materialsSummary.length} chars`);
+    }
+
+    // Append all highlights and notes verbatim
     if (allHighlights.length > 0) {
-      materialsSummary += `\n\nALL STUDENT HIGHLIGHTS (verbatim from all pages):\n${allHighlights.map((h) => `  - ${h}`).join("\n")}`;
+      materialsSummary += `\n\nALL STUDENT HIGHLIGHTS (verbatim):\n${allHighlights.map((h) => `  - ${h}`).join("\n")}`;
     }
     if (allNotes.length > 0) {
-      materialsSummary += `\n\nALL STUDENT HANDWRITTEN NOTES (verbatim from all pages):\n${allNotes.map((n) => `  - ${n}`).join("\n")}`;
+      materialsSummary += `\n\nALL STUDENT HANDWRITTEN NOTES (verbatim):\n${allNotes.map((n) => `  - ${n}`).join("\n")}`;
     }
   }
 
@@ -316,10 +311,10 @@ export async function generateStudyGuide(
     }
   }
 
-  // Safety cap: if condensed text is still too large, truncate
-  if (materialsSummary.length > 120_000) {
-    console.warn(`Condensed summary still large (${materialsSummary.length} chars). Truncating to 120k.`);
-    materialsSummary = materialsSummary.slice(0, 120_000) + "\n\n[...remaining material truncated for length]";
+  // Hard safety cap
+  if (materialsSummary.length > MAX_FINAL_PROMPT_CHARS) {
+    console.warn(`Final summary ${materialsSummary.length} chars, truncating to ${MAX_FINAL_PROMPT_CHARS}`);
+    materialsSummary = materialsSummary.slice(0, MAX_FINAL_PROMPT_CHARS) + "\n\n[...truncated]";
   }
 
   console.log(`generateStudyGuide: ${extractedContents.length} pages, final prompt ~${materialsSummary.length} chars`);
