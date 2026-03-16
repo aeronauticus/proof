@@ -284,27 +284,63 @@ function TestDetailContent() {
   async function handleGenerateGuide() {
     setGeneratingGuide(true);
     setGuideError(null);
+
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min timeout
-      const res = await fetch(`/api/tests/${test!.id}/materials`, {
+      // Kick off background generation
+      const kickoff = await fetch(`/api/tests/${test!.id}/materials`, {
         method: "PATCH",
-        signal: controller.signal,
       });
-      clearTimeout(timeout);
-      if (res.ok) {
-        await loadTest();
-        setShowGuide(true);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setGuideError(data.error || `Server error (${res.status})`);
+      const kickoffData = await kickoff.json();
+
+      if (!kickoff.ok && kickoffData.error) {
+        setGuideError(kickoffData.error);
+        setGeneratingGuide(false);
+        return;
       }
+
+      // Poll for completion
+      let attempts = 0;
+      const MAX_ATTEMPTS = 120; // 10 minutes max (5s intervals)
+      while (attempts < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 5000)); // 5 second intervals
+        attempts++;
+
+        try {
+          const poll = await fetch(`/api/tests/${test!.id}/materials`, {
+            method: "PUT",
+          });
+          const data = await poll.json();
+
+          if (data.status === "done") {
+            await loadTest();
+            setShowGuide(true);
+            setGeneratingGuide(false);
+            return;
+          }
+
+          if (data.status === "error") {
+            setGuideError(data.error || "Generation failed");
+            setGeneratingGuide(false);
+            return;
+          }
+
+          if (data.status === "idle") {
+            // Generation finished between kicks — reload
+            await loadTest();
+            setShowGuide(true);
+            setGeneratingGuide(false);
+            return;
+          }
+
+          // Still generating — continue polling
+        } catch {
+          // Network blip — keep polling
+        }
+      }
+
+      setGuideError("Taking too long. Check back in a minute.");
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setGuideError("Timed out — too many photos. Try removing some and retry.");
-      } else {
-        setGuideError(`Error: ${err instanceof Error ? err.message : "Unknown"}`);
-      }
+      setGuideError(`Error: ${err instanceof Error ? err.message : "Unknown"}`);
       console.error("Guide generation failed:", err);
     }
     setGeneratingGuide(false);
@@ -623,14 +659,14 @@ function TestDetailContent() {
                     className="w-full mt-2 py-3 bg-green-600 text-white font-medium rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
                     {generatingGuide
-                      ? "Creating your study guide & practice quiz..."
+                      ? "Generating... (this runs in the background)"
                       : studyGuide
                         ? `Update Study Guide & Quiz (${readableCount} photos)`
                         : `Generate Study Guide & Quiz (${readableCount} photos)`}
                   </button>
-                  {generatingGuide && readableCount > 15 && (
-                    <p className="mt-1 text-xs text-gray-500 text-center">
-                      This may take a minute with {readableCount} photos...
+                  {generatingGuide && (
+                    <p className="mt-1 text-xs text-gray-500 text-center animate-pulse">
+                      Working on it — you can leave this page and come back
                     </p>
                   )}
                   {guideError && (

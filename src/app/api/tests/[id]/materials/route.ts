@@ -397,7 +397,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   return NextResponse.json({ ok: true, remainingCount: remaining.length });
 }
 
-// PATCH /api/tests/[id]/materials — generate study guide from all uploaded materials
+// In-memory tracker for background guide generation
+const generatingTests = new Map<number, { status: "generating" | "done" | "error"; error?: string; startedAt: number }>();
+
+// PATCH /api/tests/[id]/materials — kick off study guide generation in background
 export async function PATCH(req: NextRequest, { params }: Params) {
   const session = await getSession();
   if (!session) {
@@ -406,6 +409,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const testId = parseInt(id);
+
+  // Check if already generating
+  const existing = generatingTests.get(testId);
+  if (existing && existing.status === "generating") {
+    return NextResponse.json({ status: "generating" });
+  }
 
   const test = await getTestById(testId);
   if (!test) {
@@ -428,23 +437,52 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .then((rows) => rows[0]);
   const subjectName = subject?.name || "Unknown";
 
-  let guide = null;
-  try {
-    guide = await regenerateGuide(
-      testId,
-      test.subjectId,
-      subjectName,
-      test.topics,
-      test.title
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("Study guide generation failed:", message, err);
-    return NextResponse.json(
-      { error: `Failed to generate study guide: ${message}` },
-      { status: 500 }
-    );
+  // Mark as generating and run in background
+  generatingTests.set(testId, { status: "generating", startedAt: Date.now() });
+
+  // Fire and forget — don't await
+  regenerateGuide(testId, test.subjectId, subjectName, test.topics, test.title)
+    .then(() => {
+      console.log(`Study guide generated for test ${testId}`);
+      generatingTests.set(testId, { status: "done", startedAt: Date.now() });
+      // Clean up after 5 minutes
+      setTimeout(() => generatingTests.delete(testId), 5 * 60 * 1000);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Study guide generation failed for test ${testId}:`, message, err);
+      generatingTests.set(testId, { status: "error", error: message, startedAt: Date.now() });
+      setTimeout(() => generatingTests.delete(testId), 5 * 60 * 1000);
+    });
+
+  return NextResponse.json({ status: "generating" });
+}
+
+// PUT /api/tests/[id]/materials — check generation status
+export async function PUT(req: NextRequest, { params }: Params) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json({ ok: true, studyGuide: guide });
+  const { id } = await params;
+  const testId = parseInt(id);
+
+  const entry = generatingTests.get(testId);
+  if (!entry) {
+    return NextResponse.json({ status: "idle" });
+  }
+
+  if (entry.status === "error") {
+    generatingTests.delete(testId);
+    return NextResponse.json({ status: "error", error: entry.error });
+  }
+
+  if (entry.status === "done") {
+    generatingTests.delete(testId);
+    const guide = await getGuide(testId);
+    return NextResponse.json({ status: "done", studyGuide: guide });
+  }
+
+  return NextResponse.json({ status: "generating", elapsed: Date.now() - entry.startedAt });
 }
