@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "npx tsx src/lib/pre-migrate.ts && npx drizzle-kit push --force && npx tsx src/lib/seed.ts && next start",
+    "start": "npx tsx src/lib/pre-migrate.ts && npx tsx src/lib/seed.ts && next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
