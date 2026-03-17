@@ -21,7 +21,8 @@ interface NoteData {
   subjectId: number;
   subjectName: string;
   subjectColor: string;
-  photoPath: string;
+  photoPath: string | null;
+  manualNotes: string | null;
   summaryEvaluation: string | null;
   summaryFeedback: string | null;
   summaryWordCount: number | null;
@@ -51,6 +52,10 @@ function SubjectNotesContent() {
   const [quizAnswers, setQuizAnswers] = useState<string[]>([]);
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [manualText, setManualText] = useState("");
+  const [submittingManual, setSubmittingManual] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -116,6 +121,66 @@ function SubjectNotesContent() {
       setError("Upload failed. Try again.");
     }
     setUploading(false);
+  }
+
+  async function handleSubmitManualNotes() {
+    if (!manualText.trim() || !subject) return;
+    setSubmittingManual(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/notes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          noteId: note?.id || null,
+          subjectId: subject.id,
+          date,
+          manualNotes: manualText,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to submit notes");
+        setSubmittingManual(false);
+        return;
+      }
+
+      const data = await res.json();
+      setNote({
+        ...data.note,
+        subjectName: subject.name,
+        subjectColor: subject.color,
+        quizQuestions: data.evaluation.quizQuestions,
+      });
+      setShowManualInput(false);
+
+      if (data.evaluation.quizQuestions?.length > 0) {
+        setQuizAnswers(new Array(data.evaluation.quizQuestions.length).fill(""));
+      }
+    } catch {
+      setError("Failed to submit notes. Try again.");
+    }
+    setSubmittingManual(false);
+  }
+
+  async function handleRetakePhoto() {
+    if (!note) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await fetch("/api/notes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteId: note.id }),
+      });
+      setNote(null);
+      setQuizAnswers([]);
+    } catch {
+      setError("Failed to remove old notes. Try again.");
+    }
+    setDeleting(false);
   }
 
   async function handleSubmitQuiz() {
@@ -220,7 +285,7 @@ function SubjectNotesContent() {
         </div>
       )}
 
-      {/* Step 1: Upload Notes Photo */}
+      {/* Step 1: Upload Notes */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
@@ -229,66 +294,107 @@ function SubjectNotesContent() {
             >
               {hasUpload ? "✓" : "1"}
             </span>
-            <h3 className="font-semibold text-gray-800">Upload Notes Photo</h3>
+            <h3 className="font-semibold text-gray-800">Your Notes</h3>
           </div>
         </div>
 
         <div className="p-4">
           {!hasUpload ? (
-            <div>
-              <p className="text-sm text-gray-500 mb-3">
-                Take a photo of your {subject.name} notes, including the summary
-                at the bottom.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleUpload}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors disabled:opacity-50"
-              >
-                {uploading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="animate-spin h-5 w-5"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    Uploading & analyzing...
-                  </span>
-                ) : (
-                  "📷 Tap to upload photo"
-                )}
-              </button>
-            </div>
+            showManualInput ? (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">
+                  Type your {subject.name} notes and summary below.
+                </p>
+                <textarea
+                  value={manualText}
+                  onChange={(e) => setManualText(e.target.value)}
+                  rows={8}
+                  placeholder={"Today we learned about...\n\nKey points:\n- \n- \n\nSummary:\n"}
+                  className="w-full p-3 border border-gray-200 rounded-lg text-sm text-gray-800 resize-none focus:outline-none focus:border-blue-400"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowManualInput(false)}
+                    className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSubmitManualNotes}
+                    disabled={!manualText.trim() || submittingManual}
+                    className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submittingManual ? "Analyzing..." : "Submit Notes"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-gray-500 mb-3">
+                  Take a photo of your {subject.name} notes, including the summary
+                  at the bottom.
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="animate-spin h-5 w-5"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                      Uploading & analyzing...
+                    </span>
+                  ) : (
+                    "📷 Tap to upload photo"
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowManualInput(true)}
+                  className="w-full mt-2 py-2 text-sm text-blue-600 font-medium hover:text-blue-700"
+                >
+                  ✏️ Type notes instead
+                </button>
+              </div>
+            )
           ) : (
             <div className="space-y-3">
-              {/* Photo preview */}
-              <img
-                src={note!.photoPath}
-                alt="Notes"
-                className="w-full rounded-lg border border-gray-200"
-              />
+              {note!.photoPath ? (
+                <img
+                  src={note!.photoPath}
+                  alt="Notes"
+                  className="w-full rounded-lg border border-gray-200"
+                />
+              ) : note!.manualNotes ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {note!.manualNotes}
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -345,11 +451,64 @@ function SubjectNotesContent() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-2">
-                <span className="text-gray-400 text-lg">?</span>
-                <p className="text-sm text-gray-500">
-                  {note!.summaryFeedback || "Could not evaluate the summary."}
-                </p>
+              <div className="space-y-3">
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                  <span className="text-red-500 text-lg">✗</span>
+                  <div>
+                    <p className="text-sm font-medium text-red-700">
+                      Could not read your notes
+                    </p>
+                    <p className="text-sm text-red-600 mt-1">
+                      {note!.summaryFeedback || "The photo wasn't clear enough. You can retake the photo or type your notes below."}
+                    </p>
+                  </div>
+                </div>
+
+                {!showManualInput ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRetakePhoto}
+                      disabled={deleting}
+                      className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 disabled:opacity-50"
+                    >
+                      {deleting ? "Removing..." : "📷 Retake Photo"}
+                    </button>
+                    <button
+                      onClick={() => setShowManualInput(true)}
+                      className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700"
+                    >
+                      ✏️ Type Notes
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-600">
+                      Type your notes and summary below. Include the main ideas from today's class.
+                    </p>
+                    <textarea
+                      value={manualText}
+                      onChange={(e) => setManualText(e.target.value)}
+                      rows={8}
+                      placeholder={"Today we learned about...\n\nKey points:\n- \n- \n\nSummary:\n"}
+                      className="w-full p-3 border border-gray-200 rounded-lg text-sm text-gray-800 resize-none focus:outline-none focus:border-blue-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowManualInput(false)}
+                        className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSubmitManualNotes}
+                        disabled={!manualText.trim() || submittingManual}
+                        className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {submittingManual ? "Analyzing..." : "Submit Notes"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

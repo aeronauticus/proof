@@ -46,6 +46,7 @@ async function gatherPastPerformance(subjectId: number, currentTestId: number): 
     pastTests: [],
     wrongAnswers: [],
     dailyNotesWrong: [],
+    dailyNotesContent: [],
   };
 
   // 1. Past graded tests/quizzes in this subject
@@ -131,34 +132,45 @@ async function gatherPastPerformance(subjectId: number, currentTestId: number): 
     }
   }
 
-  // 3. Wrong answers from daily notes quizzes in this subject
-  const notesWithQuizzes = await db
+  // 3. Wrong answers from daily notes quizzes + notes content in this subject
+  const allNotes = await db
     .select({
       date: dailyNotes.date,
+      manualNotes: dailyNotes.manualNotes,
       quizQuestions: dailyNotes.quizQuestions,
       quizAnswers: dailyNotes.quizAnswers,
     })
     .from(dailyNotes)
     .where(eq(dailyNotes.subjectId, subjectId));
 
-  for (const note of notesWithQuizzes) {
-    if (!note.quizQuestions || !note.quizAnswers) continue;
-    const questions = note.quizQuestions as Array<{ question: string }>;
-    const answers = note.quizAnswers as Array<{
-      answer: string;
-      correct: boolean;
-      feedback: string;
-    }>;
+  for (const note of allNotes) {
+    // Collect wrong quiz answers
+    if (note.quizQuestions && note.quizAnswers) {
+      const questions = note.quizQuestions as Array<{ question: string }>;
+      const answers = note.quizAnswers as Array<{
+        answer: string;
+        correct: boolean;
+        feedback: string;
+      }>;
 
-    for (let i = 0; i < answers.length; i++) {
-      if (!answers[i].correct && questions[i]) {
-        performance.dailyNotesWrong.push({
-          date: note.date,
-          question: questions[i].question,
-          studentAnswer: answers[i].answer,
-          feedback: answers[i].feedback,
-        });
+      for (let i = 0; i < answers.length; i++) {
+        if (!answers[i].correct && questions[i]) {
+          performance.dailyNotesWrong.push({
+            date: note.date,
+            question: questions[i].question,
+            studentAnswer: answers[i].answer,
+            feedback: answers[i].feedback,
+          });
+        }
       }
+    }
+
+    // Collect notes content (manual text) for study guide enrichment
+    if (note.manualNotes) {
+      performance.dailyNotesContent.push({
+        date: note.date,
+        text: note.manualNotes,
+      });
     }
   }
 

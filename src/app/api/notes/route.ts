@@ -9,7 +9,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { uploadDir, uploadUrl } from "@/lib/uploads";
-import { evaluateNotes, evaluateAnswer } from "@/lib/ai/notes-evaluator";
+import { evaluateNotes, evaluateManualNotes, evaluateAnswer } from "@/lib/ai/notes-evaluator";
 
 // GET /api/notes?date=2026-03-14
 export async function GET(req: NextRequest) {
@@ -139,6 +139,105 @@ export async function POST(req: NextRequest) {
     },
     { status: 201 }
   );
+}
+
+// PUT /api/notes — submit manually typed notes (when photo is unreadable)
+export async function PUT(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { noteId, subjectId, date, manualNotes } = await req.json();
+
+  if (!manualNotes || !manualNotes.trim()) {
+    return NextResponse.json({ error: "Notes text required" }, { status: 400 });
+  }
+
+  // Get subject name for AI context
+  const subject = await db
+    .select()
+    .from(subjects)
+    .where(eq(subjects.id, subjectId || 0))
+    .then((rows) => rows[0]);
+
+  // Evaluate the typed notes
+  let evaluation;
+  try {
+    evaluation = await evaluateManualNotes(manualNotes, subject?.name || "");
+  } catch {
+    evaluation = {
+      summaryEvaluation: "unreadable" as const,
+      summaryWordCount: 0,
+      feedback: "Could not evaluate notes.",
+      quizQuestions: [],
+    };
+  }
+
+  let note;
+  if (noteId) {
+    // Update existing unreadable note with manual text
+    [note] = await db
+      .update(dailyNotes)
+      .set({
+        manualNotes: manualNotes.trim(),
+        summaryEvaluation: evaluation.summaryEvaluation,
+        summaryFeedback: evaluation.feedback,
+        summaryWordCount: evaluation.summaryWordCount,
+        quizQuestions: evaluation.quizQuestions,
+        // Clear old quiz answers since we have new questions
+        quizAnswers: null,
+        quizScore: null,
+        quizCompletedAt: null,
+      })
+      .where(eq(dailyNotes.id, noteId))
+      .returning();
+  } else {
+    // Create new note from manual text (no photo)
+    const noteDate = date || toISODate(new Date());
+    [note] = await db
+      .insert(dailyNotes)
+      .values({
+        date: noteDate,
+        subjectId,
+        manualNotes: manualNotes.trim(),
+        summaryEvaluation: evaluation.summaryEvaluation,
+        summaryFeedback: evaluation.feedback,
+        summaryWordCount: evaluation.summaryWordCount,
+        quizQuestions: evaluation.quizQuestions,
+      })
+      .returning();
+  }
+
+  await logAction(session.userId, "manual_notes", "notes", note.id, null, {
+    subjectId,
+    evaluation: evaluation.summaryEvaluation,
+  });
+
+  return NextResponse.json({
+    note: {
+      ...note,
+      subjectName: subject?.name,
+      subjectColor: subject?.color,
+    },
+    evaluation,
+  });
+}
+
+// DELETE /api/notes — remove a note (for re-upload when unreadable)
+export async function DELETE(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { noteId } = await req.json();
+  if (!noteId) {
+    return NextResponse.json({ error: "noteId required" }, { status: 400 });
+  }
+
+  await db.delete(dailyNotes).where(eq(dailyNotes.id, noteId));
+  return NextResponse.json({ ok: true });
 }
 
 // PATCH /api/notes — submit quiz answers

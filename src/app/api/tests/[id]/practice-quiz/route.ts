@@ -79,8 +79,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     subject?.name || "Unknown"
   );
 
-  const totalScore = results.reduce((sum, r) => sum + r.score, 0);
-  const overallScore = Math.round(totalScore / results.length);
+  const correctCount = results.filter((r) => r.correct).length;
+  const overallScore = Math.round((correctCount / results.length) * 100);
 
   // Append attempt to study guide
   const existingAttempts = (guide.quizAttempts as Array<{

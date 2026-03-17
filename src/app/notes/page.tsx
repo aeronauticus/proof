@@ -123,9 +123,14 @@ function NotesContent() {
           const isUploaded = !!note;
           const isQuizzed = !!note?.quizCompletedAt;
 
+          const isUnreadable = note?.summaryEvaluation === "unreadable";
+
           let statusLabel: string;
           let statusColor: string;
-          if (isQuizzed) {
+          if (isUnreadable) {
+            statusLabel = "Retake Photo";
+            statusColor = "text-red-600";
+          } else if (isQuizzed) {
             statusLabel = `Quiz: ${Math.round(note!.quizScore ?? 0)}%`;
             statusColor =
               (note!.quizScore ?? 0) >= 70
@@ -144,7 +149,9 @@ function NotesContent() {
               ? { text: "Good", bg: "bg-green-100 text-green-700" }
               : note?.summaryEvaluation === "too_brief"
                 ? { text: "Too Brief", bg: "bg-yellow-100 text-yellow-700" }
-                : null;
+                : isUnreadable
+                  ? { text: "Unreadable", bg: "bg-red-100 text-red-700" }
+                  : null;
 
           return (
             <button

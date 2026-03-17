@@ -118,6 +118,16 @@ async function preMigrate() {
   // study_guides.practice_quiz (may have been added as NOT NULL initially)
   // If the column exists but we need to make it nullable, that's fine — it already is in the CREATE above
 
+  // daily_notes: add manual_notes column and make photo_path nullable
+  if (!(await columnExists("daily_notes", "manual_notes"))) {
+    console.log("  ✓ Adding manual_notes column to daily_notes");
+    await sql`ALTER TABLE "daily_notes" ADD COLUMN "manual_notes" TEXT`;
+  }
+  // Make photo_path nullable (was NOT NULL, now optional since user can type notes instead)
+  try {
+    await sql`ALTER TABLE "daily_notes" ALTER COLUMN "photo_path" DROP NOT NULL`;
+  } catch { /* already nullable */ }
+
   // tests table: ensure all columns exist
   if (!(await columnExists("tests", "correction_status"))) {
     console.log("  ✓ Adding correction_status column to tests");

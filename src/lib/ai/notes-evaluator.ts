@@ -39,7 +39,7 @@ export async function evaluateNotes(
           : "image/jpeg";
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
+    model: "claude-opus-4-6",
     max_tokens: 1000,
     messages: [
       {
@@ -97,6 +97,68 @@ Respond in this exact JSON format and nothing else:
     summaryEvaluation: "unreadable",
     summaryWordCount: 0,
     feedback: "Could not read the notes photo. Please try uploading a clearer photo.",
+    quizQuestions: [],
+  };
+}
+
+/**
+ * Evaluate manually typed notes and generate quiz questions.
+ * Used when photo upload fails or is unreadable.
+ */
+export async function evaluateManualNotes(
+  notesText: string,
+  subjectName: string
+): Promise<NotesEvaluation> {
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [
+      {
+        role: "user",
+        content: `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
+
+Here are the notes:
+${notesText}
+
+Please:
+1. Check if there is a summary section (look for "summary" or the last paragraph that wraps up the material)
+2. Evaluate whether the summary is detailed enough (2-3+ sentences capturing main ideas)
+3. Count the approximate words in the summary portion
+4. Generate 2-3 quiz questions that test understanding (not just recall)
+
+A good summary explains the MAIN IDEA and WHY IT MATTERS, not just lists facts.
+
+Respond in this exact JSON format and nothing else:
+{
+  "summaryEvaluation": "adequate" or "too_brief" or "unreadable",
+  "summaryWordCount": <approximate word count of summary>,
+  "feedback": "<specific feedback for the student>",
+  "quizQuestions": [
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"}
+  ]
+}`,
+      },
+    ],
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]) as NotesEvaluation;
+    }
+  } catch {
+    // Fall through
+  }
+
+  return {
+    summaryEvaluation: "unreadable",
+    summaryWordCount: 0,
+    feedback: "Could not evaluate the notes. Please try adding more detail.",
     quizQuestions: [],
   };
 }

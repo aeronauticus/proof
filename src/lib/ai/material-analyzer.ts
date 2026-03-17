@@ -55,6 +55,11 @@ export interface PastPerformance {
     studentAnswer: string;
     feedback: string;
   }>;
+  /** Manually typed daily notes content in this subject (class notes Jack took) */
+  dailyNotesContent: Array<{
+    date: string;
+    text: string;
+  }>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -303,6 +308,13 @@ export async function generateStudyGuide(
         parts.push(`  - [${w.date}] Q: "${w.question}"`);
         parts.push(`    Student answered: "${w.studentAnswer}"`);
         if (w.feedback) parts.push(`    Feedback: ${w.feedback}`);
+      }
+    }
+
+    if (pastPerformance.dailyNotesContent.length > 0) {
+      parts.push("\nSTUDENT'S CLASS NOTES FOR THIS SUBJECT (what they learned in class):");
+      for (const n of pastPerformance.dailyNotesContent.slice(0, 10)) {
+        parts.push(`  [${n.date}]: ${n.text.slice(0, 500)}`);
       }
     }
 
