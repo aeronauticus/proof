@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import AppShell from "@/components/ui/AppShell";
+import { toLocalISODate } from "@/lib/date-utils";
 
 interface QuizQuestion {
   question: string;
@@ -41,7 +42,7 @@ function SubjectNotesContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const subjectName = decodeURIComponent(params.subject as string);
-  const date = searchParams.get("date") || new Date().toISOString().split("T")[0];
+  const date = searchParams.get("date") || toLocalISODate(new Date());
 
   const [subject, setSubject] = useState<SubjectInfo | null>(null);
   const [note, setNote] = useState<NoteData | null>(null);

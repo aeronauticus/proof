@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { toLocalISODate } from "@/lib/date-utils";
 import Lightbox from "@/components/ui/Lightbox";
 
 interface AiEval {
@@ -303,8 +304,8 @@ function AssignmentsContent() {
     loadAssignments();
   }, [filter]);
 
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const today = toLocalISODate(new Date());
+  const tomorrow = toLocalISODate(new Date(Date.now() + 86400000));
 
   // Group assignments by due date
   const grouped: Record<string, Assignment[]> = {};

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { toLocalISODate } from "@/lib/date-utils";
 
 interface Test {
   id: number;
@@ -28,7 +29,7 @@ function daysUntil(dateStr: string): number {
 }
 
 function StatusBadge({ test }: { test: Test }) {
-  const today = new Date().toISOString().split("T")[0];
+  const today = toLocalISODate(new Date());
 
   if (test.status === "upcoming") {
     const days = daysUntil(test.testDate);

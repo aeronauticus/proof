@@ -462,12 +462,18 @@ export async function sendDailySummary(
   const subject = `${subjectPrefix}Proof Daily Summary — ${dateDisplay}`;
 
   try {
-    await resend.emails.send({
-      from: "Proof <noreply@proof.app>",
+    const response = await resend.emails.send({
+      from: "Proof <noreply@resend.dev>",
       to: emails,
       subject,
       html,
     });
+
+    console.log("Resend response:", JSON.stringify(response));
+
+    if (response.error) {
+      return { success: false, sentTo: [], error: response.error.message };
+    }
 
     return { success: true, sentTo: emails };
   } catch (err: unknown) {

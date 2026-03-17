@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/ui/AppShell";
+import { toLocalISODate } from "@/lib/date-utils";
 
 interface Subject {
   subjectName: string;
@@ -21,7 +22,7 @@ function NewAssignmentContent() {
 
   useEffect(() => {
     // Get today's schedule to show relevant subjects
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalISODate(new Date());
     fetch(`/api/schedule?date=${today}`)
       .then((r) => r.json())
       .then(async (data) => {

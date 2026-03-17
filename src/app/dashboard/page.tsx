@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
 import CelebrationOverlay from "@/components/ui/CelebrationOverlay";
+import { toLocalISODate } from "@/lib/date-utils";
 
 interface PlannerAssignment {
   subject: string;
@@ -194,7 +195,7 @@ function HomeworkSection({
   const fileRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = toLocalISODate(new Date());
 
   async function handleAddPhoto(assignmentId: number, file: File) {
     setUploading(true);
@@ -786,7 +787,7 @@ function DashboardContent() {
   const [showCelebration, setShowCelebration] = useState(false);
   const prevCompletionRef = useRef(0);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = toLocalISODate(new Date());
 
   const loadData = useCallback(async () => {
     try {

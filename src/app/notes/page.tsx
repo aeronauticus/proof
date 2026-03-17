@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { toLocalISODate } from "@/lib/date-utils";
 
 interface NoteEntry {
   id: number;
@@ -26,7 +27,7 @@ function NotesContent() {
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = toLocalISODate(new Date());
 
   useEffect(() => {
     Promise.all([
@@ -79,7 +80,7 @@ function NotesContent() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Daily Notes</h2>
         <span className="text-sm text-gray-500">
-          {new Date(today + "T00:00:00").toLocaleDateString("en-US", {
+          {new Date().toLocaleDateString("en-US", {
             weekday: "short",
             month: "short",
             day: "numeric",
