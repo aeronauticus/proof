@@ -48,10 +48,11 @@ function NotesContent() {
     );
   }
 
-  // Get unique subjects from today's schedule, excluding Math
+  // Get unique subjects from today's schedule, excluding Math and Comp/Lit
   const uniqueSubjects = new Map<string, string>();
+  const excludeFromNotes = ["Math", "Comp/Lit"];
   for (const slot of slots) {
-    if (slot.subjectName !== "Math") {
+    if (!excludeFromNotes.includes(slot.subjectName)) {
       uniqueSubjects.set(slot.subjectName, slot.subjectColor);
     }
   }

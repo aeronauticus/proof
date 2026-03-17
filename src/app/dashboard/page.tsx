@@ -1228,30 +1228,70 @@ function DashboardContent() {
           </p>
         </div>
         {hasChecklist && (
-          <div className={`relative w-14 h-14 ${completionPct === 100 ? "animate-pixel-bounce" : ""}`}>
-            <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="#E5E7EB"
-                strokeWidth="3"
-              />
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"}
-                strokeWidth="3"
-                strokeDasharray={`${completionPct}, 100`}
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              {completionPct === 100 ? (
-                <span className="text-lg" role="img" aria-label="star">&#11088;</span>
-              ) : (
-                <span className="text-xs font-bold">{completionPct}%</span>
-              )}
+          completionPct === 100 ? (
+            <div className="relative w-14 h-14 flex items-center justify-center">
+              {/* Sparkle particles */}
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="absolute w-1.5 h-1.5 rounded-full bg-yellow-300"
+                  style={{
+                    top: [2, 6, 2, 6][i],
+                    left: [6, 2, 6, 48][i],
+                    right: [undefined, undefined, 6, undefined][i] as number | undefined,
+                    animation: `star-sparkle 1.5s ease-in-out infinite`,
+                    animationDelay: `${i * 0.35}s`,
+                  }}
+                />
+              ))}
+              {/* Pixel star */}
+              <svg className="w-10 h-10 animate-star-complete" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 2L14.5 8.5L21.5 9.5L16.5 14L18 21L12 17.5L6 21L7.5 14L2.5 9.5L9.5 8.5L12 2Z"
+                  fill="#FACC15"
+                  stroke="#B45309"
+                  strokeWidth="0.8"
+                  strokeLinejoin="round"
+                />
+                {/* Inner highlight for depth */}
+                <path
+                  d="M12 5L13.5 9L17.5 9.5L14.5 12.5L15.5 17L12 15L8.5 17L9.5 12.5L6.5 9.5L10.5 9L12 5Z"
+                  fill="#FDE047"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {/* Green completion ring behind */}
+              <svg className="absolute w-14 h-14 -rotate-90 opacity-40" viewBox="0 0 36 36">
+                <path
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  fill="none"
+                  stroke="#22C55E"
+                  strokeWidth="3"
+                />
+              </svg>
             </div>
-          </div>
+          ) : (
+            <div className="relative w-14 h-14">
+              <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
+                <path
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  fill="none"
+                  stroke="#E5E7EB"
+                  strokeWidth="3"
+                />
+                <path
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  fill="none"
+                  stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"}
+                  strokeWidth="3"
+                  strokeDasharray={`${completionPct}, 100`}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold">{completionPct}%</span>
+              </div>
+            </div>
+          )
         )}
       </div>
 

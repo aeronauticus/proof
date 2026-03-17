@@ -55,7 +55,25 @@ export async function evaluateNotes(
           },
           {
             type: "text",
-            text: `You are reviewing a 6th grader's ${subjectName} class notes. Please:
+            text: subjectName === "Grammar"
+              ? `You are reviewing a 6th grader's ${subjectName} class notes. Grammar notes typically contain exercises, rules, and examples rather than summaries. Please:
+
+1. Read and understand the notes content
+2. Do NOT evaluate summary length — Grammar notes don't require summaries. Always set summaryEvaluation to "adequate".
+3. Generate 2-3 quiz questions that test understanding of the grammar concepts in the notes
+
+Respond in this exact JSON format and nothing else:
+{
+  "summaryEvaluation": "adequate",
+  "summaryWordCount": 0,
+  "feedback": "<brief, encouraging feedback about the notes content>",
+  "quizQuestions": [
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"}
+  ]
+}`
+              : `You are reviewing a 6th grader's ${subjectName} class notes. Please:
 
 1. Look for a summary at the bottom of the notes page
 2. Evaluate whether the summary is detailed enough (it should be at least 2-3 sentences and capture the main ideas, not just surface details)
@@ -115,7 +133,26 @@ export async function evaluateManualNotes(
     messages: [
       {
         role: "user",
-        content: `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
+        content: subjectName === "Grammar"
+          ? `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
+
+Here are the notes:
+${notesText}
+
+Grammar notes don't require summaries. Always set summaryEvaluation to "adequate". Generate 2-3 quiz questions that test understanding of the grammar concepts.
+
+Respond in this exact JSON format and nothing else:
+{
+  "summaryEvaluation": "adequate",
+  "summaryWordCount": 0,
+  "feedback": "<brief, encouraging feedback about the notes content>",
+  "quizQuestions": [
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
+    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"}
+  ]
+}`
+          : `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
 
 Here are the notes:
 ${notesText}

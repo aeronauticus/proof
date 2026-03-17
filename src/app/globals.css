@@ -57,6 +57,23 @@ input, select, textarea {
   50% { transform: translateY(-3px); }
 }
 
+@keyframes star-spin-glow {
+  0% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px #facc15) drop-shadow(0 0 6px #f59e0b); }
+  25% { transform: scale(1.15) rotate(8deg); filter: drop-shadow(0 0 8px #facc15) drop-shadow(0 0 14px #f59e0b); }
+  50% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px #facc15) drop-shadow(0 0 6px #f59e0b); }
+  75% { transform: scale(1.15) rotate(-8deg); filter: drop-shadow(0 0 8px #facc15) drop-shadow(0 0 14px #f59e0b); }
+  100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px #facc15) drop-shadow(0 0 6px #f59e0b); }
+}
+
+@keyframes star-sparkle {
+  0%, 100% { opacity: 0; transform: scale(0); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.animate-star-complete {
+  animation: star-spin-glow 2s ease-in-out infinite;
+}
+
 @keyframes pixel-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
