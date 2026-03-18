@@ -257,7 +257,8 @@ export const dailyNotes = pgTable(
     subjectId: integer("subject_id")
       .references(() => subjects.id)
       .notNull(),
-    photoPath: text("photo_path"),
+    photoPath: text("photo_path"), // legacy single photo
+    photoPaths: json("photo_paths").$type<string[]>(), // multiple photos
     manualNotes: text("manual_notes"), // typed notes when photo is unreadable
     uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
 

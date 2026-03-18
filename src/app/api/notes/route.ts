@@ -29,6 +29,8 @@ export async function GET(req: NextRequest) {
       subjectName: subjects.name,
       subjectColor: subjects.color,
       photoPath: dailyNotes.photoPath,
+      photoPaths: dailyNotes.photoPaths,
+      manualNotes: dailyNotes.manualNotes,
       summaryEvaluation: dailyNotes.summaryEvaluation,
       summaryFeedback: dailyNotes.summaryFeedback,
       summaryWordCount: dailyNotes.summaryWordCount,
@@ -63,19 +65,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check for duplicate
+  // Check if notes already exist — if so, add photo to existing entry
   const existing = await db
     .select()
     .from(dailyNotes)
     .where(and(eq(dailyNotes.date, date), eq(dailyNotes.subjectId, subjectId)))
     .then((rows) => rows[0]);
 
-  if (existing) {
-    return NextResponse.json(
-      { error: "Notes already uploaded for this subject today" },
-      { status: 400 }
-    );
-  }
 
   // Get subject name for AI context
   const subject = await db
@@ -96,6 +92,53 @@ export async function POST(req: NextRequest) {
 
   const photoPath = uploadUrl("notes", filename);
 
+  // If existing note, add photo to the list
+  if (existing) {
+    const existingPaths = (existing.photoPaths as string[] | null) || [];
+    if (existing.photoPath && !existingPaths.includes(existing.photoPath)) {
+      existingPaths.unshift(existing.photoPath);
+    }
+    const allPaths = [...existingPaths, photoPath];
+
+    // Re-evaluate with the latest photo
+    let evaluation;
+    try {
+      evaluation = await evaluateNotes(photoPath, subject?.name || "");
+    } catch {
+      evaluation = {
+        summaryEvaluation: "unreadable" as const,
+        summaryWordCount: 0,
+        feedback: "Could not evaluate notes. Please try a clearer photo.",
+        quizQuestions: [],
+      };
+    }
+
+    const [updated] = await db
+      .update(dailyNotes)
+      .set({
+        photoPaths: allPaths,
+        summaryEvaluation: evaluation.summaryEvaluation,
+        summaryFeedback: evaluation.feedback,
+        summaryWordCount: evaluation.summaryWordCount,
+        quizQuestions: evaluation.quizQuestions,
+        // Reset quiz since new photos were added
+        quizAnswers: null,
+        quizScore: null,
+        quizCompletedAt: null,
+      })
+      .where(eq(dailyNotes.id, existing.id))
+      .returning();
+
+    return NextResponse.json({
+      note: {
+        ...updated,
+        subjectName: subject?.name,
+        subjectColor: subject?.color,
+      },
+      evaluation,
+    });
+  }
+
   // Use AI to evaluate notes and generate quiz
   let evaluation;
   try {
@@ -115,6 +158,7 @@ export async function POST(req: NextRequest) {
       date,
       subjectId,
       photoPath,
+      photoPaths: [photoPath],
       summaryEvaluation: evaluation.summaryEvaluation,
       summaryFeedback: evaluation.feedback,
       summaryWordCount: evaluation.summaryWordCount,
@@ -247,7 +291,20 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { noteId, answers } = await req.json();
+  const { noteId, answers, action: patchAction } = await req.json();
+
+  // Allow quiz retake — reset quiz results
+  if (patchAction === "reset_quiz") {
+    await db
+      .update(dailyNotes)
+      .set({
+        quizAnswers: null,
+        quizScore: null,
+        quizCompletedAt: null,
+      })
+      .where(eq(dailyNotes.id, noteId));
+    return NextResponse.json({ ok: true });
+  }
 
   const note = await db
     .select()

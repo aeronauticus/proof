@@ -22,6 +22,7 @@ interface NoteData {
   subjectName: string;
   subjectColor: string;
   photoPath: string | null;
+  photoPaths: string[] | null;
   manualNotes: string | null;
   summaryEvaluation: string | null;
   summaryFeedback: string | null;
@@ -238,6 +239,7 @@ function SubjectNotesContent() {
   const hasUpload = !!note;
   const hasQuiz = !!note?.quizQuestions && note.quizQuestions.length > 0;
   const quizDone = !!note?.quizCompletedAt;
+  const quizPassed = quizDone && (note?.quizScore ?? 0) >= 85;
 
   return (
     <div className="space-y-4">
@@ -384,17 +386,48 @@ function SubjectNotesContent() {
             )
           ) : (
             <div className="space-y-3">
-              {note!.photoPath ? (
-                <img
-                  src={note!.photoPath}
-                  alt="Notes"
-                  className="w-full rounded-lg border border-gray-200"
-                />
-              ) : note!.manualNotes ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
-                  {note!.manualNotes}
-                </div>
-              ) : null}
+              {(() => {
+                const photos = note!.photoPaths?.length
+                  ? note!.photoPaths
+                  : note!.photoPath
+                    ? [note!.photoPath]
+                    : [];
+                return photos.length > 0 ? (
+                  <>
+                    {photos.map((p, i) => (
+                      <img
+                        key={i}
+                        src={p}
+                        alt={`Notes page ${i + 1}`}
+                        className="w-full rounded-lg border border-gray-200"
+                      />
+                    ))}
+                    {!quizDone && (
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleUpload}
+                          className="hidden"
+                        />
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploading}
+                          className="w-full py-2 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-blue-300 hover:text-blue-500 text-sm disabled:opacity-50"
+                        >
+                          {uploading ? "Uploading..." : "+ Add another photo"}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : note!.manualNotes ? (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                    {note!.manualNotes}
+                  </div>
+                ) : null;
+              })()}
             </div>
           )}
         </div>
@@ -606,6 +639,41 @@ function SubjectNotesContent() {
                     </div>
                   );
                 })}
+                {!quizPassed && (
+                  <div className="space-y-2">
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-sm font-medium text-amber-800">
+                        Score below 85% — review your notes and try again!
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        // Reset quiz on server and locally
+                        await fetch("/api/notes", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ noteId: note!.id, action: "reset_quiz" }),
+                        });
+                        setNote((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                quizAnswers: null,
+                                quizScore: null,
+                                quizCompletedAt: null,
+                              }
+                            : null
+                        );
+                        setQuizAnswers(
+                          new Array(note!.quizQuestions!.length).fill("")
+                        );
+                      }}
+                      className="w-full py-3 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700"
+                    >
+                      Retake Quiz
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -613,7 +681,7 @@ function SubjectNotesContent() {
       )}
 
       {/* Done state */}
-      {quizDone && (
+      {quizPassed && (
         <button
           onClick={() => router.push("/notes")}
           className="w-full py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"

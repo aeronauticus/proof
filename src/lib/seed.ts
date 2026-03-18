@@ -16,20 +16,20 @@ async function seed() {
   const existingUsers = await db.select().from(users);
   if (existingUsers.length === 0) {
     const jackPin = await bcrypt.hash("2222", 10);
-    const parentPin = await bcrypt.hash("2013", 10);
+    const parentPin = await bcrypt.hash("0101", 10);
 
     await db.insert(users).values([
       { name: "Jack", role: "student", pinHash: jackPin },
       { name: "Parent", role: "parent", pinHash: parentPin },
     ]);
-    console.log("  ✓ Users created (Jack PIN: 2222, Parent PIN: 2013)");
+    console.log("  ✓ Users created (Jack PIN: 2222, Parent PIN: 0101)");
   } else {
     // Update PINs for existing users
     const jackPin = await bcrypt.hash("2222", 10);
-    const parentPin = await bcrypt.hash("2013", 10);
+    const parentPin = await bcrypt.hash("0101", 10);
     await db.update(users).set({ pinHash: jackPin }).where(eq(users.name, "Jack"));
     await db.update(users).set({ pinHash: parentPin }).where(eq(users.name, "Parent"));
-    console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 2013)");
+    console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 0101)");
   }
 
   // ── Subjects ───────────────────────────────────────────────────────────────
@@ -42,12 +42,15 @@ async function seed() {
       { name: "Math", color: "#EF4444", teacher: "Lieurance" },      // red
       { name: "Grammar", color: "#22C55E", teacher: "Smith" },       // green
       { name: "Comp/Lit", color: "#A855F7", teacher: "Smith" },      // purple
-      { name: "Bible", color: "#6B7280", teacher: "Smith" },         // gray
-      { name: "Science", color: "#F97316", teacher: "Einstein" },    // orange
+      { name: "Bible", color: "#F97316", teacher: "Smith" },         // orange
+      { name: "Science", color: "#111827", teacher: "Einstein" },    // black
     ]);
     console.log("  ✓ Subjects created");
   } else {
-    console.log("  - Subjects already exist, skipping");
+    // Update colors for existing subjects
+    await db.update(subjects).set({ color: "#F97316" }).where(eq(subjects.name, "Bible"));
+    await db.update(subjects).set({ color: "#111827" }).where(eq(subjects.name, "Science"));
+    console.log("  ✓ Subject colors updated (Bible=orange, Science=black)");
   }
 
   // ── Schedule Slots ─────────────────────────────────────────────────────────

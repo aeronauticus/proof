@@ -50,7 +50,7 @@ function NotesContent() {
 
   // Get unique subjects from today's schedule, excluding Math and Comp/Lit
   const uniqueSubjects = new Map<string, string>();
-  const excludeFromNotes = ["Math", "Comp/Lit"];
+  const excludeFromNotes = ["Math", "Comp/Lit", "Latin"];
   for (const slot of slots) {
     if (!excludeFromNotes.includes(slot.subjectName)) {
       uniqueSubjects.set(slot.subjectName, slot.subjectColor);
@@ -73,7 +73,7 @@ function NotesContent() {
   const totalExpected = subjectList.length;
   const totalUploaded = subjectList.filter((s) => s.note).length;
   const totalQuizzed = subjectList.filter(
-    (s) => s.note?.quizCompletedAt
+    (s) => s.note?.quizCompletedAt && (s.note.quizScore ?? 0) >= 85
   ).length;
 
   return (
@@ -126,17 +126,19 @@ function NotesContent() {
 
           const isUnreadable = note?.summaryEvaluation === "unreadable";
 
+          const quizPassed = isQuizzed && (note!.quizScore ?? 0) >= 85;
+
           let statusLabel: string;
           let statusColor: string;
           if (isUnreadable) {
             statusLabel = "Retake Photo";
             statusColor = "text-red-600";
-          } else if (isQuizzed) {
+          } else if (isQuizzed && quizPassed) {
             statusLabel = `Quiz: ${Math.round(note!.quizScore ?? 0)}%`;
-            statusColor =
-              (note!.quizScore ?? 0) >= 70
-                ? "text-green-600"
-                : "text-yellow-600";
+            statusColor = "text-green-600";
+          } else if (isQuizzed && !quizPassed) {
+            statusLabel = `${Math.round(note!.quizScore ?? 0)}% — Retake`;
+            statusColor = "text-amber-600";
           } else if (isUploaded) {
             statusLabel = "Take Quiz";
             statusColor = "text-blue-600";
@@ -190,7 +192,7 @@ function NotesContent() {
 
               {/* Status icon */}
               <div className="flex-shrink-0">
-                {isQuizzed ? (
+                {isQuizzed && quizPassed ? (
                   <svg
                     className="w-6 h-6 text-green-500"
                     fill="none"
@@ -202,6 +204,20 @@ function NotesContent() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                ) : isQuizzed && !quizPassed ? (
+                  <svg
+                    className="w-6 h-6 text-amber-500"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                     />
                   </svg>
                 ) : isUploaded ? (

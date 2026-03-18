@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { assignments, tests, subjects } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate } from "@/lib/school-days";
@@ -54,10 +54,25 @@ export async function POST(req: NextRequest) {
   const createdAssignments = [];
   const createdTests = [];
 
-  // Create assignments
+  // Create assignments (skip duplicates)
   for (const a of confirmedAssignments) {
     const subjectId = findSubjectId(a.subject);
     if (!subjectId) continue; // skip unmatched subjects
+
+    // Check for existing assignment with same subject, title, and due date
+    const existing = await db
+      .select()
+      .from(assignments)
+      .where(
+        and(
+          eq(assignments.subjectId, subjectId),
+          eq(assignments.title, a.title),
+          eq(assignments.dueDate, a.dueDate)
+        )
+      )
+      .then((rows) => rows[0]);
+
+    if (existing) continue; // skip duplicate
 
     const [created] = await db
       .insert(assignments)
@@ -79,10 +94,25 @@ export async function POST(req: NextRequest) {
     createdAssignments.push(created);
   }
 
-  // Create tests and generate study plans
+  // Create tests and generate study plans (skip duplicates)
   for (const t of confirmedTests) {
     const subjectId = findSubjectId(t.subject);
     if (!subjectId) continue;
+
+    // Check for existing test with same subject, title, and date
+    const existingTest = await db
+      .select()
+      .from(tests)
+      .where(
+        and(
+          eq(tests.subjectId, subjectId),
+          eq(tests.title, t.title),
+          eq(tests.testDate, t.testDate)
+        )
+      )
+      .then((rows) => rows[0]);
+
+    if (existingTest) continue; // skip duplicate
 
     const [created] = await db
       .insert(tests)

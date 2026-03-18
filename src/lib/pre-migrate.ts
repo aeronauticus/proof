@@ -170,6 +170,12 @@ async function preMigrate() {
     await sql`ALTER TABLE "daily_checklist" ADD COLUMN "photo_paths" JSON`;
   }
 
+  // daily_notes: add photo_paths (multiple photos) column
+  if (!(await columnExists("daily_notes", "photo_paths"))) {
+    console.log("  ✓ Adding photo_paths column to daily_notes");
+    await sql`ALTER TABLE "daily_notes" ADD COLUMN "photo_paths" JSON`;
+  }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }

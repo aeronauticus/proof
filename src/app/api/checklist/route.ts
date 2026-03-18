@@ -55,8 +55,9 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
       .where(eq(scheduleSlots.dayOfWeek, dayOfWeek as "mon" | "tue" | "wed" | "thu" | "fri"))
       .orderBy(scheduleSlots.startTime);
 
-    // Filter out Math from note review subjects
-    reviewSubjects = todaySlots.filter((s) => s.subjectName !== "Math");
+    // Filter out subjects that don't require note review
+    const excludeFromReview = ["Math", "Comp/Lit", "Latin"];
+    reviewSubjects = todaySlots.filter((s) => !excludeFromReview.includes(s.subjectName));
   }
 
   // Get any study sessions due today
@@ -138,6 +139,44 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
       orderIndex: orderIdx,
       requiresParent: false,
     });
+  }
+
+  // Carry forward incomplete items from the previous day
+  // (Only non-dynamic, non-study items — assignments carry forward via status)
+  const prevDate = new Date(dateStr + "T12:00:00");
+  prevDate.setDate(prevDate.getDate() - 1);
+  const prevDateStr = toISODate(prevDate);
+
+  const prevItems = await db
+    .select()
+    .from(dailyChecklist)
+    .where(
+      and(
+        eq(dailyChecklist.date, prevDateStr),
+        eq(dailyChecklist.completed, false)
+      )
+    );
+
+  // Only carry forward specific static items (not dynamic review notes, study sessions, or homework)
+  const carryForwardTitles = ["Reading / Memory Work", "End-of-Day Check", "Organization"];
+  for (const prev of prevItems) {
+    if (
+      prev.templateId &&
+      !prev.studySessionId &&
+      carryForwardTitles.includes(prev.title) &&
+      !items.some((i) => i.title === prev.title)
+    ) {
+      orderIdx++;
+      items.push({
+        templateId: prev.templateId,
+        date: dateStr,
+        title: prev.title,
+        subjectId: prev.subjectId,
+        studySessionId: null,
+        orderIndex: orderIdx,
+        requiresParent: prev.requiresParent,
+      });
+    }
   }
 
   if (items.length > 0) {

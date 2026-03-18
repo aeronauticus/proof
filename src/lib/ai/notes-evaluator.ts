@@ -55,12 +55,12 @@ export async function evaluateNotes(
           },
           {
             type: "text",
-            text: subjectName === "Grammar"
-              ? `You are reviewing a 6th grader's ${subjectName} class notes. Grammar notes typically contain exercises, rules, and examples rather than summaries. Please:
+            text: (subjectName === "Grammar" || subjectName === "Latin")
+              ? `You are reviewing a 6th grader's ${subjectName} class notes. ${subjectName} notes typically contain exercises, rules, and examples rather than summaries. Please:
 
 1. Read and understand the notes content
-2. Do NOT evaluate summary length — Grammar notes don't require summaries. Always set summaryEvaluation to "adequate".
-3. Generate 2-3 quiz questions that test understanding of the grammar concepts in the notes
+2. Do NOT evaluate summary length — ${subjectName} notes don't require summaries. Always set summaryEvaluation to "adequate".
+3. Generate 2-3 quiz questions that test understanding of the ${subjectName.toLowerCase()} concepts in the notes
 
 Respond in this exact JSON format and nothing else:
 {
@@ -133,13 +133,13 @@ export async function evaluateManualNotes(
     messages: [
       {
         role: "user",
-        content: subjectName === "Grammar"
+        content: (subjectName === "Grammar" || subjectName === "Latin")
           ? `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
 
 Here are the notes:
 ${notesText}
 
-Grammar notes don't require summaries. Always set summaryEvaluation to "adequate". Generate 2-3 quiz questions that test understanding of the grammar concepts.
+${subjectName} notes don't require summaries. Always set summaryEvaluation to "adequate". Generate 2-3 quiz questions that test understanding of the ${subjectName.toLowerCase()} concepts.
 
 Respond in this exact JSON format and nothing else:
 {

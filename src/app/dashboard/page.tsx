@@ -382,7 +382,7 @@ function HomeworkSection({
                   }}
                 />
 
-                <div className="flex gap-2 mt-2">
+                <div className="flex gap-2 mt-2 flex-wrap">
                   <button
                     onClick={() => fileRef.current?.click()}
                     disabled={uploading}
@@ -394,6 +394,36 @@ function HomeworkSection({
                     </svg>
                     {uploading ? "..." : photos.length > 0 ? "Add Photo" : "Take Photo"}
                   </button>
+
+                  {photos.length === 0 && !warning && (
+                    <button
+                      onClick={async () => {
+                        setSubmitting(a.id);
+                        await fetch("/api/assignments", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ id: a.id, action: "already_turned_in" }),
+                        });
+                        setSubmitting(null);
+                        onReload();
+                        // Auto-complete checklist if no more pending
+                        const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+                        const updatedData = await updatedRes.json();
+                        if ((updatedData.assignments || []).length === 0) {
+                          await fetch("/api/checklist", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ itemId: checklistItemId, action: "complete" }),
+                          });
+                          onReload();
+                        }
+                      }}
+                      disabled={submitting === a.id}
+                      className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-medium hover:bg-green-200 disabled:opacity-50"
+                    >
+                      Already Turned In
+                    </button>
+                  )}
 
                   {photos.length > 0 && !warning && (
                     <button
@@ -662,7 +692,37 @@ function PlannerReview({
 
   const totalItems = assignments.length + plannerTests.length;
 
-  if (totalItems === 0) {
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualText, setManualText] = useState("");
+  const [parsingManual, setParsingManual] = useState(false);
+
+  async function handleManualSubmit() {
+    if (!manualText.trim()) return;
+    setParsingManual(true);
+    try {
+      const res = await fetch("/api/planner/parse-manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: manualText }),
+      });
+      const data = await res.json();
+      if (data.assignments?.length || data.tests?.length) {
+        // Replace current extraction with manual parse results
+        setAssignments(
+          (data.assignments || []).map((a: PlannerAssignment) => ({ ...a, included: true }))
+        );
+        setPlannerTests(
+          (data.tests || []).map((t: PlannerTest) => ({ ...t, included: true }))
+        );
+        setShowManualEntry(false);
+      }
+    } catch {
+      // Ignore
+    }
+    setParsingManual(false);
+  }
+
+  if (totalItems === 0 && !showManualEntry) {
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
         <h3 className="font-semibold text-blue-800 text-sm mb-1">Planner Read</h3>
@@ -671,12 +731,56 @@ function PlannerReview({
             ? "AI couldn't find any assignments or tests in your planner today."
             : "Couldn't read the planner photo. Make sure it's clear and well-lit."}
         </p>
-        <button
-          onClick={onDismiss}
-          className="mt-2 text-xs text-blue-600 font-medium"
-        >
-          OK
-        </button>
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={onDismiss}
+            className="text-xs text-blue-600 font-medium"
+          >
+            OK, No Homework
+          </button>
+          <button
+            onClick={() => setShowManualEntry(true)}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+          >
+            Type Items Manually
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showManualEntry) {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+        <h3 className="font-semibold text-blue-800 text-sm">Type Planner Items</h3>
+        <p className="text-xs text-blue-600">
+          Type what&apos;s in your planner — one item per line. Include the subject and due date if you can.
+        </p>
+        <textarea
+          value={manualText}
+          onChange={(e) => setManualText(e.target.value)}
+          rows={5}
+          placeholder={"History worksheet p.45 due Wednesday\nLatin vocab quiz Friday\nScience read ch.6"}
+          className="w-full p-3 border border-blue-200 rounded-lg text-sm text-gray-800 resize-none focus:outline-none focus:border-blue-400"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setShowManualEntry(false);
+              onDismiss();
+            }}
+            className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleManualSubmit}
+            disabled={!manualText.trim() || parsingManual}
+            className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {parsingManual ? "Parsing..." : "Parse Items"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1549,45 +1653,6 @@ function DashboardContent() {
             );
           })}
         </div>
-      )}
-
-      {/* Assignments Due Today */}
-      {assignmentsDue.length > 0 && (
-        <button
-          onClick={() => router.push("/assignments")}
-          className="w-full bg-white rounded-xl p-4 border border-gray-200 text-left"
-        >
-          <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-2">
-            Due Today
-          </h3>
-          <div className="space-y-2">
-            {assignmentsDue.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg"
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: a.subjectColor }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-800">{a.title}</div>
-                  <div className="text-xs text-gray-500">{a.subjectName}</div>
-                </div>
-                {a.status === "pending" && (
-                  <span className="text-xs text-blue-600 font-medium flex-shrink-0">To do</span>
-                )}
-                {a.status === "completed" && (
-                  <span className="text-xs text-blue-500 flex-shrink-0">Done</span>
-                )}
-                {a.status === "verified" && (
-                  <span className="text-xs text-green-600 font-medium flex-shrink-0">Verified</span>
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-blue-600 font-medium mt-2 text-center">View all assignments →</p>
-        </button>
       )}
 
       {/* Today's Schedule */}

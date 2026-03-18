@@ -161,6 +161,21 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: true, photoPaths: allPaths });
   }
 
+  // Mark as already turned in at school (no photo required)
+  if (action === "already_turned_in") {
+    await db
+      .update(assignments)
+      .set({
+        status: "completed",
+        completedAt: new Date(),
+        studentConfirmedComplete: true,
+      })
+      .where(eq(assignments.id, id));
+
+    await logAction(session.userId, "already_turned_in", "assignment", id);
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "complete") {
     if (assignment.status === "verified") {
       return NextResponse.json({ error: "Already verified" }, { status: 400 });
