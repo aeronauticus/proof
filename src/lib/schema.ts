@@ -330,6 +330,8 @@ export const dailyChecklist = pgTable(
     studySessionId: integer("study_session_id").references(() => studySessions.id),
     orderIndex: integer("order_index").notNull(),
     requiresParent: boolean("requires_parent").default(false).notNull(),
+    waivedBy: integer("waived_by").references(() => users.id),
+    waivedAt: timestamp("waived_at"),
   },
   (table) => [index("idx_checklist_date").on(table.date)]
 );

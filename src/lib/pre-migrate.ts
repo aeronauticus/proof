@@ -176,6 +176,13 @@ async function preMigrate() {
     await sql`ALTER TABLE "daily_notes" ADD COLUMN "photo_paths" JSON`;
   }
 
+  // daily_checklist: add waived_by and waived_at columns for parent waive/dismiss
+  if (!(await columnExists("daily_checklist", "waived_by"))) {
+    console.log("  ✓ Adding waived_by/waived_at columns to daily_checklist");
+    await sql`ALTER TABLE "daily_checklist" ADD COLUMN "waived_by" INTEGER REFERENCES "users"("id")`;
+    await sql`ALTER TABLE "daily_checklist" ADD COLUMN "waived_at" TIMESTAMP`;
+  }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }

@@ -61,6 +61,9 @@ interface ChecklistItem {
   aiHomeworkEval: AiHomeworkEval | null;
   studentConfirmedComplete: boolean;
   studyContext?: StudyContext;
+  date?: string;
+  waivedBy?: number | null;
+  waivedAt?: string | null;
 }
 
 interface StudyProgressTest {
@@ -888,6 +891,7 @@ function DashboardContent() {
   const [plannerExtraction, setPlannerExtraction] = useState<PlannerExtraction | null>(null);
   const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
   const [homeworkAssignments, setHomeworkAssignments] = useState<Assignment[]>([]);
+  const [missingItems, setMissingItems] = useState<ChecklistItem[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
   const prevCompletionRef = useRef(0);
 
@@ -895,7 +899,7 @@ function DashboardContent() {
 
   const loadData = useCallback(async () => {
     try {
-      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes] =
+      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes, missingRes] =
         await Promise.all([
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
@@ -903,6 +907,7 @@ function DashboardContent() {
           fetch(`/api/assignments?status=pending&to=${today}`), // all pending up to today (for homework)
           fetch(`/api/tests`),
           fetch(`/api/study-progress`),
+          fetch(`/api/checklist/missing`),
         ]);
 
       const checklistData = await checklistRes.json();
@@ -911,6 +916,7 @@ function DashboardContent() {
       const homeworkData = await homeworkRes.json();
       const testsData = await testsRes.json();
       const studyProgressData = await studyProgressRes.json();
+      const missingData = await missingRes.json();
 
       setChecklist(checklistData.items || []);
       setIsSchoolDay(checklistData.isSchoolDay);
@@ -918,6 +924,7 @@ function DashboardContent() {
       setSchedule(scheduleData.slots || []);
       setAssignmentsDue(assignmentsData.assignments || []);
       setHomeworkAssignments(homeworkData.assignments || []);
+      setMissingItems(missingData.items || []);
       setStudyProgress(
         (studyProgressData.tests || []).filter(
           (t: StudyProgressTest) =>
@@ -1138,6 +1145,38 @@ function DashboardContent() {
               className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex-shrink-0 ml-3"
             >
               Verify
+            </button>
+          </div>
+        ),
+      });
+    }
+
+    // Missing items from previous days (parent can waive)
+    for (const item of missingItems) {
+      const dateLabel = item.date
+        ? new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+        : "";
+      actionItems.push({
+        type: "missing",
+        priority: 1,
+        node: (
+          <div key={`missing-${item.id}`} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-red-900">{item.title}</span>
+              <span className="text-[11px] text-red-500 ml-2">{dateLabel}</span>
+            </div>
+            <button
+              onClick={async () => {
+                await fetch("/api/checklist", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ itemId: item.id, action: "waive" }),
+                });
+                loadData();
+              }}
+              className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 flex-shrink-0 ml-2"
+            >
+              Waive
             </button>
           </div>
         ),
@@ -1461,6 +1500,42 @@ function DashboardContent() {
           onConfirm={handlePlannerConfirm}
           onDismiss={() => setPlannerExtraction(null)}
         />
+      )}
+
+      {/* Missing items from previous days */}
+      {missingItems.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-red-200">
+            <h3 className="font-bold text-red-800 text-sm">
+              Missing from Previous Days ({missingItems.length})
+            </h3>
+            <p className="text-xs text-red-600 mt-0.5">
+              These items still need to be completed or waived by a parent.
+            </p>
+          </div>
+          <div className="divide-y divide-red-100">
+            {missingItems.map((item) => {
+              const dateLabel = item.date
+                ? new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+                : "";
+              return (
+                <div key={item.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full border-2 border-red-300 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-red-900 font-medium">{item.title}</span>
+                    <span className="text-[11px] text-red-500 ml-2">{dateLabel}</span>
+                  </div>
+                  <button
+                    onClick={() => handleChecklistToggle(item.id)}
+                    className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 flex-shrink-0"
+                  >
+                    Complete
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Step 2: Daily Quests */}

@@ -141,43 +141,9 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
     });
   }
 
-  // Carry forward incomplete items from the previous day
-  // (Only non-dynamic, non-study items — assignments carry forward via status)
-  const prevDate = new Date(dateStr + "T12:00:00");
-  prevDate.setDate(prevDate.getDate() - 1);
-  const prevDateStr = toISODate(prevDate);
-
-  const prevItems = await db
-    .select()
-    .from(dailyChecklist)
-    .where(
-      and(
-        eq(dailyChecklist.date, prevDateStr),
-        eq(dailyChecklist.completed, false)
-      )
-    );
-
-  // Only carry forward specific static items (not dynamic review notes, study sessions, or homework)
-  const carryForwardTitles = ["Reading / Memory Work", "End-of-Day Check", "Organization"];
-  for (const prev of prevItems) {
-    if (
-      prev.templateId &&
-      !prev.studySessionId &&
-      carryForwardTitles.includes(prev.title) &&
-      !items.some((i) => i.title === prev.title)
-    ) {
-      orderIdx++;
-      items.push({
-        templateId: prev.templateId,
-        date: dateStr,
-        title: prev.title,
-        subjectId: prev.subjectId,
-        studySessionId: null,
-        orderIndex: orderIdx,
-        requiresParent: prev.requiresParent,
-      });
-    }
-  }
+  // NOTE: Incomplete items from previous days are no longer duplicated here.
+  // They are surfaced separately via GET /api/checklist/missing and shown
+  // as "missing" on the dashboard until completed or waived by a parent.
 
   if (items.length > 0) {
     await db.insert(dailyChecklist).values(items);
@@ -495,6 +461,24 @@ export async function PATCH(req: NextRequest) {
       .where(eq(dailyChecklist.id, itemId));
 
     await logAction(session.userId, "verify", "checklist", itemId);
+
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "waive") {
+    if (session.role !== "parent") {
+      return NextResponse.json(
+        { error: "Parent access required" },
+        { status: 403 }
+      );
+    }
+
+    await db
+      .update(dailyChecklist)
+      .set({ waivedBy: session.userId, waivedAt: new Date() })
+      .where(eq(dailyChecklist.id, itemId));
+
+    await logAction(session.userId, "waive", "checklist", itemId);
 
     return NextResponse.json({ ok: true });
   }
