@@ -159,10 +159,20 @@ async function seed() {
         isDynamic: true,
       },
       {
+        title: "Practice Latin on Quizlet",
+        description:
+          "Open Quizlet and practice your current Latin vocabulary set. Aim for at least one full round.",
+        orderIndex: 5,
+        applicableDays: schoolDays,
+        requiresParent: false,
+        category: "study",
+        isDynamic: false,
+      },
+      {
         title: "Reading / Memory Work",
         description:
           "Work on assigned reading or memory work. Perform reading or memory work aloud to a parent.",
-        orderIndex: 5,
+        orderIndex: 6,
         applicableDays: everyDay,
         requiresParent: true,
         category: "study",
@@ -172,7 +182,7 @@ async function seed() {
         title: "End-of-Day Check",
         description:
           "Know what you need to do tomorrow. Make sure binders are ready for school. Show final completed homework and planner to a parent.",
-        orderIndex: 6,
+        orderIndex: 7,
         applicableDays: schoolDays,
         requiresParent: true,
         category: "end_of_day",
@@ -188,6 +198,33 @@ async function seed() {
         .update(checklistTemplates)
         .set({ applicableDays: everyDay })
         .where(eq(checklistTemplates.title, title));
+    }
+    // Add "Practice Latin on Quizlet" if it doesn't exist yet
+    const latinQuizlet = existingTemplates.find(
+      (t) => t.title === "Practice Latin on Quizlet"
+    );
+    if (!latinQuizlet) {
+      const schoolDays = ["mon", "tue", "wed", "thu", "fri"];
+      await db.insert(checklistTemplates).values({
+        title: "Practice Latin on Quizlet",
+        description:
+          "Open Quizlet and practice your current Latin vocabulary set. Aim for at least one full round.",
+        orderIndex: 5,
+        applicableDays: schoolDays,
+        requiresParent: false,
+        category: "study",
+        isDynamic: false,
+      });
+      // Bump order of items that follow
+      await db
+        .update(checklistTemplates)
+        .set({ orderIndex: 6 })
+        .where(eq(checklistTemplates.title, "Reading / Memory Work"));
+      await db
+        .update(checklistTemplates)
+        .set({ orderIndex: 7 })
+        .where(eq(checklistTemplates.title, "End-of-Day Check"));
+      console.log("  ✓ Added 'Practice Latin on Quizlet' template");
     }
     console.log("  ✓ Checklist templates updated (weekends enabled for Homework & Reading)");
   }

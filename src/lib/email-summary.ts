@@ -463,7 +463,7 @@ export async function sendDailySummary(
 
   try {
     const response = await resend.emails.send({
-      from: "Proof <noreply@resend.dev>",
+      from: process.env.EMAIL_FROM || "Proof <noreply@resend.dev>",
       to: emails,
       subject,
       html,
