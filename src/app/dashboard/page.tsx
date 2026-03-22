@@ -1502,7 +1502,7 @@ function DashboardContent() {
         />
       )}
 
-      {/* Missing items from previous days */}
+      {/* Missing items from previous days — uses full ChecklistRow so all gates apply */}
       {missingItems.length > 0 && (
         <div className="bg-red-50 border-2 border-red-300 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-red-200">
@@ -1510,30 +1510,41 @@ function DashboardContent() {
               Missing from Previous Days ({missingItems.length})
             </h3>
             <p className="text-xs text-red-600 mt-0.5">
-              These items still need to be completed or waived by a parent.
+              These items still need to be completed and verified by a parent.
             </p>
           </div>
           <div className="divide-y divide-red-100">
-            {missingItems.map((item) => {
-              const dateLabel = item.date
-                ? new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-                : "";
-              return (
-                <div key={item.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="w-5 h-5 rounded-full border-2 border-red-300 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-red-900 font-medium">{item.title}</span>
-                    <span className="text-[11px] text-red-500 ml-2">{dateLabel}</span>
+            {(() => {
+              // Group missing items by date for visual clarity
+              let lastDate = "";
+              return missingItems.map((item) => {
+                const showDateHeader = item.date !== lastDate;
+                lastDate = item.date || "";
+                const dateLabel = item.date
+                  ? new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+                  : "";
+                return (
+                  <div key={item.id}>
+                    {showDateHeader && (
+                      <div className="px-4 pt-3 pb-1">
+                        <span className="text-[11px] font-bold text-red-400 uppercase tracking-wide">{dateLabel}</span>
+                      </div>
+                    )}
+                    <ChecklistRow
+                      item={item}
+                      hasPlannerPhoto={false}
+                      homeworkAssignments={homeworkAssignments}
+                      onToggle={handleChecklistToggle}
+                      onAddPhoto={handleAddPhoto}
+                      onCompleteHomework={handleCompleteHomework}
+                      onConfirmComplete={handleConfirmComplete}
+                      onReadingNotes={handleReadingNotes}
+                      onReload={loadData}
+                    />
                   </div>
-                  <button
-                    onClick={() => handleChecklistToggle(item.id)}
-                    className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 flex-shrink-0"
-                  >
-                    Complete
-                  </button>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
       )}
