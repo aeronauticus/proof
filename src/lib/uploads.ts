@@ -14,5 +14,5 @@ export function uploadDir(category: string) {
 }
 
 export function uploadUrl(category: string, filename: string) {
-  return `/uploads/${category}/${filename}`;
+  return `/api/uploads/${category}/${filename}`;
 }
