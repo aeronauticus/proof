@@ -1,16 +1,21 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Rewrite /uploads/* to /api/uploads/* so that existing DB paths
-  // (stored as /uploads/category/file) are served by the API route handler
-  // instead of Next.js static file serving (which only serves build-time files).
+  // Rewrite /uploads/* to /api/uploads/* BEFORE static file lookup.
+  // Next.js only serves public/ files from build time, so runtime uploads
+  // need to be routed to the API handler. "beforeFiles" ensures this rewrite
+  // runs before Next.js checks the public/ directory.
   async rewrites() {
-    return [
-      {
-        source: "/uploads/:path*",
-        destination: "/api/uploads/:path*",
-      },
-    ];
+    return {
+      beforeFiles: [
+        {
+          source: "/uploads/:path*",
+          destination: "/api/uploads/:path*",
+        },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
   },
 };
 
