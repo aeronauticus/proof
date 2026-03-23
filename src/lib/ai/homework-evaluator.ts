@@ -39,7 +39,7 @@ export async function evaluateHomeworkPhotos(
   const imageContents: Anthropic.ImageBlockParam[] = [];
   for (const photoPath of photoPaths) {
     // photoPath is like "/uploads/checklist/filename.jpg"
-    const relativePath = photoPath.replace(/^\/uploads\//, "");
+    const relativePath = photoPath.replace(/^\/(api\/)?uploads\//, "");
     const fullPath = join(UPLOAD_BASE, relativePath);
     const imageBuffer = await readFile(fullPath);
     const base64 = imageBuffer.toString("base64");

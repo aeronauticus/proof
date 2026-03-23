@@ -82,7 +82,7 @@ function toImageBlock(base64: string, photoPath: string): Anthropic.ImageBlockPa
 }
 
 async function loadImage(photoPath: string): Promise<{ base64: string; photoPath: string }> {
-  const relativePath = photoPath.replace(/^\/uploads\//, "");
+  const relativePath = photoPath.replace(/^\/(api\/)?uploads\//, "");
   const fullPath = join(UPLOAD_BASE, relativePath);
   const imageBuffer = await readFile(fullPath);
   return { base64: imageBuffer.toString("base64"), photoPath };

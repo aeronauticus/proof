@@ -19,7 +19,7 @@ interface ScoreResult {
 export async function readScoreFromPhoto(
   photoPath: string
 ): Promise<ScoreResult> {
-  const relativePath = photoPath.replace(/^\/uploads\//, "");
+  const relativePath = photoPath.replace(/^\/(api\/)?uploads\//, "");
   const fullPath = join(UPLOAD_BASE, relativePath);
   const imageBuffer = await readFile(fullPath);
   const base64 = imageBuffer.toString("base64");
