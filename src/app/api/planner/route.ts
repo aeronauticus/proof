@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { plannerPhotos, subjects } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate } from "@/lib/school-days";
@@ -78,11 +78,22 @@ export async function POST(req: NextRequest) {
   }, { status: 201 });
 }
 
-// GET /api/planner?date=2026-03-14
+// GET /api/planner?date=2026-03-14  — single date
+// GET /api/planner?all=true          — all photos, newest first
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const all = req.nextUrl.searchParams.get("all");
+
+  if (all) {
+    const photos = await db
+      .select()
+      .from(plannerPhotos)
+      .orderBy(sql`${plannerPhotos.date} DESC`);
+    return NextResponse.json({ photos });
   }
 
   const date =
