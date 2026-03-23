@@ -16,7 +16,7 @@ async function seed() {
   const existingUsers = await db.select().from(users);
   if (existingUsers.length === 0) {
     const jackPin = await bcrypt.hash("2222", 10);
-    const parentPin = await bcrypt.hash("0101", 10);
+    const parentPin = await bcrypt.hash("2013", 10);
 
     await db.insert(users).values([
       { name: "Jack", role: "student", pinHash: jackPin },
@@ -26,7 +26,7 @@ async function seed() {
   } else {
     // Update PINs for existing users
     const jackPin = await bcrypt.hash("2222", 10);
-    const parentPin = await bcrypt.hash("0101", 10);
+    const parentPin = await bcrypt.hash("2013", 10);
     await db.update(users).set({ pinHash: jackPin }).where(eq(users.name, "Jack"));
     await db.update(users).set({ pinHash: parentPin }).where(eq(users.name, "Parent"));
     console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 0101)");
