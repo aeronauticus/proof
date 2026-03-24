@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
+import CelebrationOverlay from "@/components/ui/CelebrationOverlay";
 import { toLocalISODate } from "@/lib/date-utils";
 
 interface PlannerAssignment {
@@ -891,6 +892,8 @@ function DashboardContent() {
   const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
   const [homeworkAssignments, setHomeworkAssignments] = useState<Assignment[]>([]);
   const [missingItems, setMissingItems] = useState<ChecklistItem[]>([]);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const prevCompletionRef = useRef(0);
 
   const today = toLocalISODate(new Date());
 
@@ -1067,6 +1070,19 @@ function DashboardContent() {
   const totalCount = checklist.length;
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const hasChecklist = totalCount > 0;
+
+  useEffect(() => {
+    if (
+      completionPct === 100 &&
+      prevCompletionRef.current < 100 &&
+      totalCount > 0 &&
+      !loading &&
+      session?.role === "student"
+    ) {
+      setShowCelebration(true);
+    }
+    prevCompletionRef.current = completionPct;
+  }, [completionPct, totalCount, loading, session?.role]);
 
   if (loading) {
     return (
@@ -1348,6 +1364,10 @@ function DashboardContent() {
   // ── Student View ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      {showCelebration && (
+        <CelebrationOverlay onDismiss={() => setShowCelebration(false)} />
+      )}
+
       {/* Header with date and progress ring */}
       <div className="flex items-center justify-between">
         <div>
@@ -1695,28 +1715,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Today's Schedule */}
-      {schedule.length > 0 && (
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide mb-2">
-            Today&apos;s Classes
-          </h3>
-          <div className="space-y-1.5">
-            {schedule.map((slot, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span
-                  className="w-1 h-6 rounded-full"
-                  style={{ backgroundColor: slot.subjectColor }}
-                />
-                <span className="flex-1 text-sm text-gray-700">{slot.subjectName}</span>
-                <span className="text-xs text-gray-400">
-                  {formatTime(slot.startTime)}-{formatTime(slot.endTime)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
