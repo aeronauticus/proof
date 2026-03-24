@@ -343,7 +343,7 @@ export const plannerPhotos = pgTable(
   {
     id: serial("id").primaryKey(),
     date: text("date").notNull().unique(), // ISO date
-    photoPath: text("photo_path").notNull(),
+    photoPath: text("photo_path"), // null when planner entered manually
     uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
   },
   (table) => [index("idx_planner_date").on(table.date)]

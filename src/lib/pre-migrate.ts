@@ -183,6 +183,11 @@ async function preMigrate() {
     await sql`ALTER TABLE "daily_checklist" ADD COLUMN "waived_at" TIMESTAMP`;
   }
 
+  // planner_photos: make photo_path nullable (allow manual entry without photo)
+  try {
+    await sql`ALTER TABLE "planner_photos" ALTER COLUMN "photo_path" DROP NOT NULL`;
+  } catch { /* already nullable */ }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }

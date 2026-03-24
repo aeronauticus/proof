@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
-import CelebrationOverlay from "@/components/ui/CelebrationOverlay";
 import { toLocalISODate } from "@/lib/date-utils";
 
 interface PlannerAssignment {
@@ -892,8 +891,6 @@ function DashboardContent() {
   const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
   const [homeworkAssignments, setHomeworkAssignments] = useState<Assignment[]>([]);
   const [missingItems, setMissingItems] = useState<ChecklistItem[]>([]);
-  const [showCelebration, setShowCelebration] = useState(false);
-  const prevCompletionRef = useRef(0);
 
   const today = toLocalISODate(new Date());
 
@@ -1053,25 +1050,23 @@ function DashboardContent() {
     loadData(); // reload to show new assignments/tests
   }
 
+  async function handleManualPlannerEntry() {
+    // Create a planner record without a photo so hasPlannerPhoto becomes true
+    await fetch("/api/planner/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: today }),
+    });
+    await loadData();
+    // Show manual entry form via PlannerReview with empty extraction
+    setPlannerExtraction({ assignments: [], tests: [], rawNotes: "" });
+  }
+
   // Compute these before any early returns so hooks are always called
   const completedCount = checklist.filter((i) => i.completed).length;
   const totalCount = checklist.length;
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const hasChecklist = totalCount > 0;
-
-  // Trigger celebration when all items completed
-  useEffect(() => {
-    if (
-      completionPct === 100 &&
-      prevCompletionRef.current < 100 &&
-      totalCount > 0 &&
-      !loading &&
-      session?.role === "student"
-    ) {
-      setShowCelebration(true);
-    }
-    prevCompletionRef.current = completionPct;
-  }, [completionPct, totalCount, loading, session?.role]);
 
   if (loading) {
     return (
@@ -1353,11 +1348,6 @@ function DashboardContent() {
   // ── Student View ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      {/* Celebration overlay */}
-      {showCelebration && (
-        <CelebrationOverlay onDismiss={() => setShowCelebration(false)} />
-      )}
-
       {/* Header with date and progress ring */}
       <div className="flex items-center justify-between">
         <div>
@@ -1371,70 +1361,26 @@ function DashboardContent() {
           </p>
         </div>
         {hasChecklist && (
-          completionPct === 100 ? (
-            <div className="relative w-14 h-14 flex items-center justify-center">
-              {/* Sparkle particles */}
-              {[0, 1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="absolute w-1.5 h-1.5 rounded-full bg-yellow-300"
-                  style={{
-                    top: [2, 6, 2, 6][i],
-                    left: [6, 2, 6, 48][i],
-                    right: [undefined, undefined, 6, undefined][i] as number | undefined,
-                    animation: `star-sparkle 1.5s ease-in-out infinite`,
-                    animationDelay: `${i * 0.35}s`,
-                  }}
-                />
-              ))}
-              {/* Pixel star */}
-              <svg className="w-10 h-10 animate-star-complete" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 2L14.5 8.5L21.5 9.5L16.5 14L18 21L12 17.5L6 21L7.5 14L2.5 9.5L9.5 8.5L12 2Z"
-                  fill="#FACC15"
-                  stroke="#B45309"
-                  strokeWidth="0.8"
-                  strokeLinejoin="round"
-                />
-                {/* Inner highlight for depth */}
-                <path
-                  d="M12 5L13.5 9L17.5 9.5L14.5 12.5L15.5 17L12 15L8.5 17L9.5 12.5L6.5 9.5L10.5 9L12 5Z"
-                  fill="#FDE047"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              {/* Green completion ring behind */}
-              <svg className="absolute w-14 h-14 -rotate-90 opacity-40" viewBox="0 0 36 36">
-                <path
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  fill="none"
-                  stroke="#22C55E"
-                  strokeWidth="3"
-                />
-              </svg>
+          <div className="relative w-14 h-14">
+            <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
+              <path
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke="#E5E7EB"
+                strokeWidth="3"
+              />
+              <path
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"}
+                strokeWidth="3"
+                strokeDasharray={`${completionPct}, 100`}
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xs font-bold">{completionPct}%</span>
             </div>
-          ) : (
-            <div className="relative w-14 h-14">
-              <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
-                <path
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  fill="none"
-                  stroke="#E5E7EB"
-                  strokeWidth="3"
-                />
-                <path
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  fill="none"
-                  stroke={completionPct >= 90 ? "#22C55E" : completionPct >= 50 ? "#EAB308" : "#EF4444"}
-                  strokeWidth="3"
-                  strokeDasharray={`${completionPct}, 100`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-xs font-bold">{completionPct}%</span>
-              </div>
-            </div>
-          )
+          </div>
         )}
       </div>
 
@@ -1473,21 +1419,29 @@ function DashboardContent() {
             </p>
           </div>
           {!hasPlannerPhoto && (
-            <label className="flex items-center gap-1 px-3 py-2 bg-yellow-600 text-white rounded-lg cursor-pointer hover:bg-yellow-700 transition-colors text-sm font-medium">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              {uploading ? "..." : "Photo"}
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handlePlannerUpload}
-                disabled={uploading}
-              />
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 px-3 py-2 bg-yellow-600 text-white rounded-lg cursor-pointer hover:bg-yellow-700 transition-colors text-sm font-medium">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                {uploading ? "..." : "Photo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePlannerUpload}
+                  disabled={uploading}
+                />
+              </label>
+              <button
+                onClick={handleManualPlannerEntry}
+                className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+              >
+                Type Instead
+              </button>
+            </div>
           )}
         </div>
       </div>
