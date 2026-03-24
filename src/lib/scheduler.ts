@@ -56,8 +56,8 @@ export function startScheduler() {
   scheduled = true;
 
   const tz = process.env.EMAIL_TIMEZONE || "America/Los_Angeles";
-  // Default: 6:30 PM PT, Mon-Fri
-  const cronExpr = process.env.DAILY_EMAIL_CRON || "30 18 * * 1-5";
+  // Default: 10:00 PM PT, Mon-Fri
+  const cronExpr = process.env.DAILY_EMAIL_CRON || "0 22 * * 1-5";
 
   // Schedule the recurring cron
   cron.schedule(cronExpr, () => {

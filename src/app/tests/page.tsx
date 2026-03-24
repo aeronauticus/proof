@@ -110,6 +110,16 @@ function TestsContent() {
     setTests(data.tests || []);
   }
 
+  async function handleDelete(id: number) {
+    if (!confirm("Delete this test/quiz and its study plan?")) return;
+    await fetch("/api/tests", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setTests((prev) => prev.filter((t) => t.id !== id));
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -189,17 +199,30 @@ function TestsContent() {
                     {test.letterGrade && ` (${test.letterGrade})`}
                   </span>
                 )}
-                {test.status === "upcoming" && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTake(test.id);
-                    }}
-                    className="text-xs px-3 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                  >
-                    Mark as Taken
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {test.status === "upcoming" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTake(test.id);
+                      }}
+                      className="text-xs px-3 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                    >
+                      Mark as Taken
+                    </button>
+                  )}
+                  {session?.role === "parent" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(test.id);
+                      }}
+                      className="text-xs px-2 py-1 text-red-500 hover:bg-red-50 rounded-lg"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

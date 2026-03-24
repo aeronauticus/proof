@@ -29,7 +29,7 @@ async function seed() {
     const parentPin = await bcrypt.hash("2013", 10);
     await db.update(users).set({ pinHash: jackPin }).where(eq(users.name, "Jack"));
     await db.update(users).set({ pinHash: parentPin }).where(eq(users.name, "Parent"));
-    console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 0101)");
+    console.log("  ✓ Users updated (Jack PIN: 2222, Parent PIN: 2013)");
   }
 
   // ── Subjects ───────────────────────────────────────────────────────────────

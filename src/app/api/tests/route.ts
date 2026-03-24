@@ -129,6 +129,27 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
+  if (action === "edit") {
+    if (session.role !== "parent") {
+      return NextResponse.json({ error: "Parent access required" }, { status: 403 });
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (data.title !== undefined) updates.title = data.title;
+    if (data.testDate !== undefined) updates.testDate = data.testDate;
+    if (data.subjectId !== undefined) updates.subjectId = data.subjectId;
+    if (data.type !== undefined) updates.type = data.type;
+    if (data.topics !== undefined) updates.topics = data.topics || null;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+    }
+
+    await db.update(tests).set(updates).where(eq(tests.id, id));
+    await logAction(session.userId, "edit", "test", id, null, updates);
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "take") {
     // Mark test as taken
     if (test.status !== "upcoming") {
@@ -246,4 +267,55 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+}
+
+// DELETE /api/tests — parent-only delete (cascades to study plans, sessions, materials, guides)
+export async function DELETE(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (session.role !== "parent") {
+    return NextResponse.json({ error: "Parent access required" }, { status: 403 });
+  }
+
+  const { id } = await req.json();
+
+  const test = await db
+    .select()
+    .from(tests)
+    .where(eq(tests.id, id))
+    .then((rows) => rows[0]);
+
+  if (!test) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Delete related study sessions, then study plans
+  const plans = await db
+    .select()
+    .from(studyPlans)
+    .where(eq(studyPlans.testId, id));
+
+  if (plans.length > 0) {
+    const planIds = plans.map((p) => p.id);
+    await db.delete(studySessions).where(inArray(studySessions.planId, planIds));
+    await db.delete(studyPlans).where(eq(studyPlans.testId, id));
+  }
+
+  // Delete study materials and guides
+  const { studyMaterials, studyGuides } = await import("@/lib/schema");
+  await db.delete(studyMaterials).where(eq(studyMaterials.testId, id));
+  await db.delete(studyGuides).where(eq(studyGuides.testId, id));
+
+  // Delete the test itself
+  await db.delete(tests).where(eq(tests.id, id));
+
+  await logAction(session.userId, "delete", "test", id, null, {
+    title: test.title,
+    testDate: test.testDate,
+  });
+
+  return NextResponse.json({ ok: true });
 }

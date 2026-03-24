@@ -5,8 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
 
+interface Subject {
+  id: number;
+  name: string;
+  color: string;
+}
+
 interface Test {
   id: number;
+  subjectId: number;
   subjectName: string;
   subjectColor: string;
   type: string;
@@ -174,6 +181,14 @@ function TestDetailContent() {
   const [previewMaterial, setPreviewMaterial] = useState<StudyMaterial | null>(null);
   const [guideError, setGuideError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editType, setEditType] = useState("");
+  const [editSubjectId, setEditSubjectId] = useState<number>(0);
+  const [editTopics, setEditTopics] = useState("");
+  const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
+  const [saving, setSaving] = useState(false);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -219,6 +234,42 @@ function TestDetailContent() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: test!.id, action: "take" }),
     });
+    loadTest();
+  }
+
+  async function startEditing() {
+    if (!test) return;
+    setEditTitle(test.title);
+    setEditDate(test.testDate);
+    setEditType(test.type);
+    setEditSubjectId(test.subjectId);
+    setEditTopics(test.topics || "");
+    if (allSubjects.length === 0) {
+      const res = await fetch("/api/subjects");
+      const data = await res.json();
+      setAllSubjects(data.subjects || []);
+    }
+    setEditing(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!test) return;
+    setSaving(true);
+    await fetch("/api/tests", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: test.id,
+        action: "edit",
+        title: editTitle,
+        testDate: editDate,
+        type: editType,
+        subjectId: editSubjectId,
+        topics: editTopics,
+      }),
+    });
+    setSaving(false);
+    setEditing(false);
     loadTest();
   }
 
@@ -443,35 +494,117 @@ function TestDetailContent() {
       </div>
 
       {/* Test Info */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200 space-y-2">
-        <div className="flex justify-between">
-          <span className="text-gray-500">Date</span>
-          <span className="font-medium">
-            {new Date(test.testDate + "T00:00:00").toLocaleDateString("en-US", {
-              weekday: "short", month: "short", day: "numeric",
-            })}
-          </span>
-        </div>
-        {test.topics && (
-          <div className="flex justify-between">
-            <span className="text-gray-500">Topics</span>
-            <span className="font-medium text-right max-w-[60%]">{test.topics}</span>
+      {editing ? (
+        <div className="bg-white rounded-xl p-4 border-2 border-blue-300 space-y-3">
+          <h3 className="font-semibold text-gray-800 text-sm">Edit Test</h3>
+          <div>
+            <label className="text-xs text-gray-500">Title</label>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              className="w-full p-2 border rounded-lg text-gray-800 text-sm"
+            />
           </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-gray-500">Status</span>
-          <span className="font-medium capitalize">{test.status}</span>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500">Date</label>
+              <input
+                type="date"
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
+                className="w-full p-2 border rounded-lg text-gray-800 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Type</label>
+              <select
+                value={editType}
+                onChange={(e) => setEditType(e.target.value)}
+                className="w-full p-2 border rounded-lg text-gray-800 text-sm"
+              >
+                <option value="test">Test</option>
+                <option value="quiz">Quiz</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Subject</label>
+            <select
+              value={editSubjectId}
+              onChange={(e) => setEditSubjectId(parseInt(e.target.value))}
+              className="w-full p-2 border rounded-lg text-gray-800 text-sm"
+            >
+              {allSubjects.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Topics</label>
+            <input
+              type="text"
+              value={editTopics}
+              onChange={(e) => setEditTopics(e.target.value)}
+              placeholder="Optional"
+              className="w-full p-2 border rounded-lg text-gray-800 text-sm"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setEditing(false)}
+              className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveEdit}
+              disabled={saving || !editTitle.trim() || !editDate}
+              className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
         </div>
-        {test.scoreRaw !== null && (
+      ) : (
+        <div className="bg-white rounded-xl p-4 border border-gray-200 space-y-2">
           <div className="flex justify-between">
-            <span className="text-gray-500">Score</span>
-            <span className="font-bold text-lg">
-              {test.scoreRaw}/{test.scoreTotal}
-              {test.letterGrade && ` (${test.letterGrade})`}
+            <span className="text-gray-500">Date</span>
+            <span className="font-medium">
+              {new Date(test.testDate + "T00:00:00").toLocaleDateString("en-US", {
+                weekday: "short", month: "short", day: "numeric",
+              })}
             </span>
           </div>
-        )}
-      </div>
+          {test.topics && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Topics</span>
+              <span className="font-medium text-right max-w-[60%]">{test.topics}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-gray-500">Status</span>
+            <span className="font-medium capitalize">{test.status}</span>
+          </div>
+          {test.scoreRaw !== null && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Score</span>
+              <span className="font-bold text-lg">
+                {test.scoreRaw}/{test.scoreTotal}
+                {test.letterGrade && ` (${test.letterGrade})`}
+              </span>
+            </div>
+          )}
+          {session?.role === "parent" && (
+            <button
+              onClick={startEditing}
+              className="w-full mt-2 py-2 text-sm text-blue-600 font-medium hover:bg-blue-50 rounded-lg"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+      )}
 
       {/* UPCOMING: Study materials, guide, quiz, study plan, "Mark as Taken" */}
       {test.status === "upcoming" && (
