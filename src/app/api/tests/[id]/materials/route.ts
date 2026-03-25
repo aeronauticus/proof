@@ -366,6 +366,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   });
 }
 
+
 // DELETE /api/tests/[id]/materials — remove a material
 export async function DELETE(req: NextRequest, { params }: Params) {
   const session = await getSession();
@@ -470,7 +471,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return NextResponse.json({ status: "generating" });
 }
 
-// PUT /api/tests/[id]/materials — check generation status
+// PUT /api/tests/[id]/materials — add manual text OR check generation status
 export async function PUT(req: NextRequest, { params }: Params) {
   const session = await getSession();
   if (!session) {
@@ -480,6 +481,54 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const testId = parseInt(id);
 
+  const body = await req.json().catch(() => ({}));
+
+  // If body contains text, this is a manual material entry
+  if (body.text) {
+    const test = await getTestById(testId);
+    if (!test) {
+      return NextResponse.json({ error: "Test not found" }, { status: 404 });
+    }
+    if (test.status !== "upcoming") {
+      return NextResponse.json(
+        { error: "Can only add study materials for upcoming tests" },
+        { status: 400 }
+      );
+    }
+
+    const text = (body.text as string).trim();
+    if (text.length < 10) {
+      return NextResponse.json(
+        { error: "Please enter at least a couple sentences of study material" },
+        { status: 400 }
+      );
+    }
+
+    const extractedContent = {
+      rawText: text,
+      highlightedText: [] as string[],
+      handwrittenNotes: [] as string[],
+      sourceType: "notes" as const,
+    };
+
+    const [inserted] = await db
+      .insert(studyMaterials)
+      .values({
+        testId,
+        photoPath: null,
+        extractedContent,
+      })
+      .returning();
+
+    await logAction(session.userId, "manual_entry", "study_material", inserted.id, null, {
+      testId,
+      textLength: text.length,
+    });
+
+    return NextResponse.json({ ok: true, materials: [inserted] });
+  }
+
+  // Otherwise, check generation status
   const entry = generatingTests.get(testId);
   if (!entry) {
     return NextResponse.json({ status: "idle" });

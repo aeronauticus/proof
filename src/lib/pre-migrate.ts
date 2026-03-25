@@ -188,6 +188,11 @@ async function preMigrate() {
     await sql`ALTER TABLE "planner_photos" ALTER COLUMN "photo_path" DROP NOT NULL`;
   } catch { /* already nullable */ }
 
+  // study_materials: make photo_path nullable (allow manual text entry)
+  try {
+    await sql`ALTER TABLE "study_materials" ALTER COLUMN "photo_path" DROP NOT NULL`;
+  } catch { /* already nullable */ }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }

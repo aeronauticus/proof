@@ -191,7 +191,7 @@ export const studyMaterials = pgTable(
     testId: integer("test_id")
       .references(() => tests.id)
       .notNull(),
-    photoPath: text("photo_path").notNull(),
+    photoPath: text("photo_path"),
     uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
     extractedContent: json("extracted_content").$type<{
       rawText: string;

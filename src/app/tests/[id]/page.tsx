@@ -52,7 +52,7 @@ interface StudySession {
 interface StudyMaterial {
   id: number;
   testId: number;
-  photoPath: string;
+  photoPath: string | null;
   uploadedAt: string;
   extractedContent: {
     rawText: string;
@@ -189,6 +189,9 @@ function TestDetailContent() {
   const [editTopics, setEditTopics] = useState("");
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [saving, setSaving] = useState(false);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualText, setManualText] = useState("");
+  const [submittingManual, setSubmittingManual] = useState(false);
   const materialFileRef = useRef<HTMLInputElement>(null);
 
   const loadTest = useCallback(async () => {
@@ -329,6 +332,28 @@ function TestDetailContent() {
     setUploadingMaterial(false);
     setUploadProgress(null);
     if (materialFileRef.current) materialFileRef.current.value = "";
+    loadTest();
+  }
+
+  async function handleManualSubmit() {
+    if (!test || manualText.trim().length < 10) return;
+    setSubmittingManual(true);
+    try {
+      const res = await fetch(`/api/tests/${test.id}/materials`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: manualText }),
+      });
+      const data = await res.json();
+      if (data.ok && data.materials) {
+        setMaterials((prev) => [...prev, ...data.materials]);
+        setManualText("");
+        setShowManualEntry(false);
+      }
+    } catch (err) {
+      console.error("Manual material submission failed:", err);
+    }
+    setSubmittingManual(false);
     loadTest();
   }
 
@@ -616,29 +641,31 @@ function TestDetailContent() {
                 Study Materials
                 {materials.length > 0 && (
                   <span className="ml-2 text-xs font-normal px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                    {materials.length} photo{materials.length !== 1 ? "s" : ""}
+                    {materials.length} item{materials.length !== 1 ? "s" : ""}
                   </span>
                 )}
               </h3>
             </div>
 
-            {materials.length === 0 && !uploadingMaterial && (
+            {materials.length === 0 && !uploadingMaterial && !showManualEntry && (
               <p className="text-sm text-gray-500 mb-3">
-                Upload photos of your textbook pages, handouts, or notes. The AI will read each one and show you what it found.
+                Upload photos of your textbook pages, handouts, or notes — or type them in manually.
               </p>
             )}
 
             {/* Summary: X of Y read successfully */}
             {materials.length > 0 && (() => {
-              const readOk = materials.filter((m) => m.extractedContent).length;
-              const readFail = materials.length - readOk;
+              const photos = materials.filter((m) => m.photoPath);
+              const manual = materials.filter((m) => !m.photoPath);
+              const readOk = photos.filter((m) => m.extractedContent).length;
+              const readFail = photos.length - readOk;
               return (
-                <div className="flex items-center gap-2 mb-2 text-sm">
-                  <span className="text-green-700 font-medium">{readOk} read OK</span>
+                <div className="flex items-center gap-2 mb-2 text-sm flex-wrap">
+                  {photos.length > 0 && <span className="text-green-700 font-medium">{readOk} photo{readOk !== 1 ? "s" : ""} read OK</span>}
                   {readFail > 0 && (
                     <span className="text-red-600 font-medium">{readFail} couldn&apos;t read</span>
                   )}
-                  <span className="text-gray-400">of {materials.length} photo{materials.length !== 1 ? "s" : ""}</span>
+                  {manual.length > 0 && <span className="text-blue-700 font-medium">{manual.length} typed</span>}
                 </div>
               );
             })()}
@@ -648,21 +675,35 @@ function TestDetailContent() {
               <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
                 {materials.map((m, idx) => {
                   const ok = !!m.extractedContent;
+                  const isManual = !m.photoPath;
                   return (
                     <div key={m.id} className="relative flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setLightboxIndex(idx)}
-                        className="block"
-                      >
-                        <img
-                          src={m.photoPath}
-                          alt="Study material"
-                          className={`h-20 w-20 object-cover rounded-lg border-2 ${
-                            ok ? "border-green-400" : "border-red-400"
-                          }`}
-                        />
-                      </button>
+                      {isManual ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
+                          className="h-20 w-20 rounded-lg border-2 border-blue-400 bg-blue-50 flex flex-col items-center justify-center gap-1"
+                        >
+                          <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          <span className="text-[9px] text-blue-600 font-medium">typed</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxIndex(idx)}
+                          className="block"
+                        >
+                          <img
+                            src={m.photoPath!}
+                            alt="Study material"
+                            className={`h-20 w-20 object-cover rounded-lg border-2 ${
+                              ok ? "border-green-400" : "border-red-400"
+                            }`}
+                          />
+                        </button>
+                      )}
                       {/* Delete button */}
                       <button
                         onClick={() => handleDeleteMaterial(m.id)}
@@ -671,20 +712,22 @@ function TestDetailContent() {
                         &times;
                       </button>
                       {/* Info button — shows extracted text preview */}
-                      <button
-                        onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
-                        className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          ok ? "bg-green-600 text-white" : "bg-red-600 text-white"
-                        }`}
-                      >
-                        {ok ? "i" : "!"}
-                      </button>
+                      {!isManual && (
+                        <button
+                          onClick={() => setPreviewMaterial(previewMaterial?.id === m.id ? null : m)}
+                          className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            ok ? "bg-green-600 text-white" : "bg-red-600 text-white"
+                          }`}
+                        >
+                          {ok ? "i" : "!"}
+                        </button>
+                      )}
                       {/* Status badge */}
-                      <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${
+                      {!isManual && <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${
                         ok ? "bg-green-600/80 text-white" : "bg-red-600/80 text-white"
                       }`}>
                         {ok ? (m.extractedContent?.sourceType || "OK") : "failed"}
-                      </span>
+                      </span>}
                     </div>
                   );
                 })}
@@ -694,7 +737,7 @@ function TestDetailContent() {
             {/* Lightbox */}
             {lightboxIndex !== null && materials.length > 0 && (
               <Lightbox
-                photos={materials.map((m) => m.photoPath)}
+                photos={materials.filter((m) => m.photoPath).map((m) => m.photoPath!)}
                 initialIndex={lightboxIndex}
                 onClose={() => setLightboxIndex(null)}
               />
@@ -776,6 +819,49 @@ function TestDetailContent() {
                     : "Upload Study Materials"}
             </button>
 
+            {/* Manual text entry */}
+            {!showManualEntry ? (
+              <button
+                onClick={() => setShowManualEntry(true)}
+                disabled={uploadingMaterial || generatingGuide}
+                className="w-full mt-2 flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-200 rounded-xl text-gray-500 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-colors disabled:opacity-50"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Type Study Notes Manually
+              </button>
+            ) : (
+              <div className="mt-2 border border-blue-200 rounded-xl p-3 bg-blue-50/50">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Type or paste your study material
+                </label>
+                <textarea
+                  value={manualText}
+                  onChange={(e) => setManualText(e.target.value)}
+                  placeholder="Type key terms, definitions, facts, concepts, or paste text from your notes..."
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+                  autoFocus
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handleManualSubmit}
+                    disabled={submittingManual || manualText.trim().length < 10}
+                    className="flex-1 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {submittingManual ? "Saving..." : "Add Material"}
+                  </button>
+                  <button
+                    onClick={() => { setShowManualEntry(false); setManualText(""); }}
+                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Generate / update study guide */}
             {materials.length > 0 && !uploadingMaterial && (() => {
               const readableCount = materials.filter((m) => m.extractedContent).length;
@@ -794,8 +880,8 @@ function TestDetailContent() {
                     {generatingGuide
                       ? "Generating... (this runs in the background)"
                       : studyGuide
-                        ? `Update Study Guide & Quiz (${readableCount} photos)`
-                        : `Generate Study Guide & Quiz (${readableCount} photos)`}
+                        ? `Update Study Guide & Quiz (${readableCount} item${readableCount !== 1 ? "s" : ""})`
+                        : `Generate Study Guide & Quiz (${readableCount} item${readableCount !== 1 ? "s" : ""})`}
                   </button>
                   {generatingGuide && (
                     <p className="mt-1 text-xs text-gray-500 text-center animate-pulse">

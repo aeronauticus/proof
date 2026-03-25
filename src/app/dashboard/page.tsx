@@ -907,7 +907,7 @@ function DashboardContent() {
           fetch(`/api/assignments?status=pending&to=${today}`), // all pending up to today (for homework)
           fetch(`/api/tests`),
           fetch(`/api/study-progress`),
-          fetch(`/api/checklist/missing`),
+          fetch(`/api/checklist/missing?date=${today}`),
         ]);
 
       const checklistData = await checklistRes.json();
