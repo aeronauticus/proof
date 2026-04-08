@@ -1,7 +1,14 @@
 import cron from "node-cron";
 import { sendDailySummary } from "./email-summary";
 import { isSchoolDay } from "./school-days";
-import { toISODate } from "./school-days";
+
+/**
+ * Get today's date as YYYY-MM-DD in the configured timezone (not UTC).
+ * At 10 PM PT on April 7, this returns "2026-04-07" (not "2026-04-08").
+ */
+function todayInTz(tz: string): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: tz });
+}
 
 let scheduled = false;
 
@@ -61,7 +68,7 @@ export function startScheduler() {
 
   // Schedule the recurring cron
   cron.schedule(cronExpr, () => {
-    const today = toISODate(new Date());
+    const today = todayInTz(tz);
     trySendForDate(today, "Cron");
   }, { timezone: tz });
 
@@ -72,7 +79,7 @@ export function startScheduler() {
     new Date().toLocaleString("en-US", { timeZone: tz })
   );
   if (isPastScheduledTime(cronExpr, nowInTz)) {
-    const today = toISODate(new Date());
+    const today = todayInTz(tz);
     console.log(`[Scheduler] Startup catch-up: past scheduled time, checking ${today}...`);
     trySendForDate(today, "Catch-up").catch((err) =>
       console.error("[Scheduler] Catch-up error:", err)
