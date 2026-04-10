@@ -28,6 +28,7 @@ interface Test {
   letterGrade: string | null;
   aiConfidence: number | null;
   photoPath: string | null;
+  photoPaths: string[] | null;
   returnedAt: string | null;
   correctionStatus: string;
   studentProposedScoreRaw: number | null;
@@ -277,12 +278,14 @@ function TestDetailContent() {
   }
 
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
     setUploading(true);
 
     const formData = new FormData();
-    formData.append("photo", file);
+    for (const file of Array.from(files)) {
+      formData.append("photos", file);
+    }
 
     await fetch(`/api/tests/${test!.id}/photo`, {
       method: "POST",
@@ -1107,20 +1110,24 @@ function TestDetailContent() {
 
           <div className="bg-white rounded-xl p-4 border border-gray-200">
             <h3 className="font-semibold text-gray-800 mb-3">
-              Got your grade back? Upload the test.
+              Got your grade back? Upload all pages.
             </h3>
+            <p className="text-sm text-gray-500 mb-3">
+              You can upload multiple pages at once (great for math tests with per-problem scores).
+            </p>
             <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
               <svg className="w-10 h-10 text-gray-400 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               <span className="text-sm text-gray-600">
-                {uploading ? "Uploading & reading score..." : "Tap to take a photo of your graded test"}
+                {uploading ? "Uploading & reading score..." : "Tap to upload photos of your graded test"}
               </span>
               <input
                 type="file"
                 accept="image/*"
                 capture="environment"
+                multiple
                 className="hidden"
                 onChange={handlePhotoUpload}
                 disabled={uploading}
@@ -1139,16 +1146,30 @@ function TestDetailContent() {
         </>
       )}
 
-      {/* RETURNED: Show AI-read score, photo, correction option, parent review */}
+      {/* RETURNED: Show AI-read score, photo(s), correction option, parent review */}
       {test.status === "returned" && (
         <>
-          {test.photoPath && (
+          {(test.photoPaths || test.photoPath) && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <img
-                src={test.photoPath}
-                alt="Graded test"
-                className="w-full"
-              />
+              {(test.photoPaths && test.photoPaths.length > 0 ? test.photoPaths : test.photoPath ? [test.photoPath] : []).map((p, i) => (
+                <img key={i} src={p} alt={`Graded test page ${i + 1}`} className="w-full" />
+              ))}
+              {/* Add more photos */}
+              <label className="flex items-center justify-center gap-2 py-3 border-t border-gray-200 text-sm text-gray-500 cursor-pointer hover:bg-gray-50 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                {uploading ? "Uploading..." : "Add more pages"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                  disabled={uploading}
+                />
+              </label>
             </div>
           )}
 
@@ -1282,9 +1303,11 @@ function TestDetailContent() {
       {/* REVIEWED: Show final state */}
       {test.status === "reviewed" && (
         <>
-          {test.photoPath && (
+          {(test.photoPaths || test.photoPath) && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <img src={test.photoPath} alt="Graded test" className="w-full" />
+              {(test.photoPaths && test.photoPaths.length > 0 ? test.photoPaths : test.photoPath ? [test.photoPath] : []).map((p, i) => (
+                <img key={i} src={p} alt={`Graded test page ${i + 1}`} className="w-full" />
+              ))}
             </div>
           )}
           {test.parentNotes && (

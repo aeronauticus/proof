@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
       letterGrade: tests.letterGrade,
       aiConfidence: tests.aiConfidence,
       photoPath: tests.photoPath,
+      photoPaths: tests.photoPaths,
       returnedAt: tests.returnedAt,
       correctionStatus: tests.correctionStatus,
       studentProposedScoreRaw: tests.studentProposedScoreRaw,

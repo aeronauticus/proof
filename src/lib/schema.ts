@@ -119,7 +119,8 @@ export const tests = pgTable(
     scoreTotal: real("score_total"),
     letterGrade: text("letter_grade"),
     aiConfidence: real("ai_confidence"), // 0-1
-    photoPath: text("photo_path"),
+    photoPath: text("photo_path"), // legacy single photo
+    photoPaths: json("photo_paths").$type<string[]>(), // multiple photos
     returnedAt: timestamp("returned_at"),
 
     // Error correction (when student disputes AI-read score)

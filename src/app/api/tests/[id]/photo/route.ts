@@ -8,13 +8,12 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { uploadDir, uploadUrl } from "@/lib/uploads";
-import { readScoreFromPhoto } from "@/lib/ai/score-reader";
+import { readScoreFromPhotos } from "@/lib/ai/score-reader";
 
-// POST /api/tests/[id]/photo — upload graded test photo, AI reads score
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+type Params = { params: Promise<{ id: string }> };
+
+// POST /api/tests/[id]/photo — upload one or more graded test photos, AI reads score
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -33,36 +32,44 @@ export async function POST(
     return NextResponse.json({ error: "Test not found" }, { status: 404 });
   }
 
-  if (test.status !== "taken") {
+  if (test.status !== "taken" && test.status !== "returned") {
     return NextResponse.json(
-      { error: "Test must be in 'taken' status to upload a grade photo" },
+      { error: "Test must be in 'taken' or 'returned' status to upload photos" },
       { status: 400 }
     );
   }
 
   const formData = await req.formData();
-  const file = formData.get("photo") as File | null;
+  const photoFiles = formData.getAll("photos") as File[];
+  const single = formData.get("photo") as File | null;
+  const files = photoFiles.length > 0 ? photoFiles : single ? [single] : [];
 
-  if (!file) {
-    return NextResponse.json({ error: "No photo provided" }, { status: 400 });
+  if (files.length === 0) {
+    return NextResponse.json({ error: "No photos provided" }, { status: 400 });
   }
 
-  // Save file
-  const ext = file.name.split(".").pop() || "jpg";
-  const filename = `test-${testId}-${randomUUID()}.${ext}`;
+  // Save all files
   const dir = uploadDir("tests");
   await mkdir(dir, { recursive: true });
-  const filepath = join(dir, filename);
 
-  const bytes = await file.arrayBuffer();
-  await writeFile(filepath, Buffer.from(bytes));
+  const newPaths: string[] = [];
+  for (const file of files) {
+    const ext = file.name.split(".").pop() || "jpg";
+    const filename = `test-${testId}-${randomUUID()}.${ext}`;
+    const filepath = join(dir, filename);
+    const bytes = await file.arrayBuffer();
+    await writeFile(filepath, Buffer.from(bytes));
+    newPaths.push(uploadUrl("tests", filename));
+  }
 
-  const photoPath = uploadUrl("tests", filename);
+  // Merge with any existing photos
+  const existingPaths = (test.photoPaths as string[] | null) || [];
+  const allPaths = [...existingPaths, ...newPaths];
 
-  // Use AI to read the score
+  // Use AI to read the score from all photos together
   let scoreResult;
   try {
-    scoreResult = await readScoreFromPhoto(photoPath);
+    scoreResult = await readScoreFromPhotos(allPaths);
   } catch (err) {
     scoreResult = {
       scoreRaw: null,
@@ -73,13 +80,14 @@ export async function POST(
     };
   }
 
-  // Update test with photo and AI-read score
+  // Update test with photos and AI-read score
   await db
     .update(tests)
     .set({
       status: "returned",
-      photoPath,
-      returnedAt: new Date(),
+      photoPath: allPaths[0], // backward compat — first photo
+      photoPaths: allPaths,
+      returnedAt: test.returnedAt || new Date(),
       scoreRaw: scoreResult.scoreRaw,
       scoreTotal: scoreResult.scoreTotal,
       letterGrade: scoreResult.letterGrade,
@@ -88,13 +96,14 @@ export async function POST(
     .where(eq(tests.id, testId));
 
   await logAction(session.userId, "upload_grade", "test", testId, null, {
-    photoPath,
+    photoPaths: allPaths,
+    newPhotos: newPaths.length,
     scoreResult,
   });
 
   return NextResponse.json({
     ok: true,
-    photoPath,
+    photoPaths: allPaths,
     score: scoreResult,
   });
 }

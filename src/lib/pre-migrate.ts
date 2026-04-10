@@ -193,6 +193,14 @@ async function preMigrate() {
     await sql`ALTER TABLE "study_materials" ALTER COLUMN "photo_path" DROP NOT NULL`;
   } catch { /* already nullable */ }
 
+  // tests: add photo_paths JSON column for multiple graded test photos
+  if (!(await columnExists("tests", "photo_paths"))) {
+    console.log("  ✓ Adding photo_paths column to tests");
+    await sql`ALTER TABLE "tests" ADD COLUMN "photo_paths" JSON`;
+    // Migrate existing single photo to array
+    await sql`UPDATE "tests" SET "photo_paths" = json_build_array("photo_path") WHERE "photo_path" IS NOT NULL`;
+  }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }
