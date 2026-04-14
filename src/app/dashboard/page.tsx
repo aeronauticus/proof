@@ -108,6 +108,18 @@ interface Assignment {
   studentConfirmedComplete: boolean;
 }
 
+interface Book {
+  id: number;
+  title: string;
+  author: string | null;
+  dueDate: string;
+  startedAt: string;
+  status: string;
+  testScore: number | null;
+  completedAt: string | null;
+  notes: string | null;
+}
+
 interface Test {
   id: number;
   subjectName: string;
@@ -121,7 +133,12 @@ interface Test {
   scoreTotal: number | null;
   letterGrade: string | null;
   correctionStatus: string;
+  correctionReason: string | null;
+  studentProposedScoreRaw: number | null;
+  studentProposedScoreTotal: number | null;
+  studentProposedLetterGrade: string | null;
   photoPath: string | null;
+  photoPaths: string[] | null;
 }
 
 function formatTime(time: string): string {
@@ -883,6 +900,8 @@ function DashboardContent() {
   const [assignmentsDue, setAssignmentsDue] = useState<Assignment[]>([]);
   const [upcomingTests, setUpcomingTests] = useState<Test[]>([]);
   const [overdueTests, setOverdueTests] = useState<Test[]>([]);
+  const [pendingCorrections, setPendingCorrections] = useState<Test[]>([]);
+  const [expandedCorrection, setExpandedCorrection] = useState<number | null>(null);
   const [pendingVerification, setPendingVerification] = useState<ChecklistItem[]>([]);
   const [hasPlannerPhoto, setHasPlannerPhoto] = useState(false);
   const [isSchoolDay, setIsSchoolDay] = useState(true);
@@ -892,6 +911,13 @@ function DashboardContent() {
   const [studyProgress, setStudyProgress] = useState<StudyProgressTest[]>([]);
   const [homeworkAssignments, setHomeworkAssignments] = useState<Assignment[]>([]);
   const [missingItems, setMissingItems] = useState<ChecklistItem[]>([]);
+  const [activeBook, setActiveBook] = useState<Book | null>(null);
+  const [showAddBook, setShowAddBook] = useState(false);
+  const [newBookTitle, setNewBookTitle] = useState("");
+  const [newBookAuthor, setNewBookAuthor] = useState("");
+  const [newBookDueDate, setNewBookDueDate] = useState("");
+  const [savingBook, setSavingBook] = useState(false);
+  const [bookScoreInputs, setBookScoreInputs] = useState<Record<number, string>>({});
   const [showCelebration, setShowCelebration] = useState(false);
   const prevCompletionRef = useRef(0);
 
@@ -899,7 +925,7 @@ function DashboardContent() {
 
   const loadData = useCallback(async () => {
     try {
-      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes, missingRes] =
+      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes, missingRes, booksRes] =
         await Promise.all([
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
@@ -908,6 +934,7 @@ function DashboardContent() {
           fetch(`/api/tests`),
           fetch(`/api/study-progress`),
           fetch(`/api/checklist/missing?date=${today}`),
+          fetch(`/api/books`),
         ]);
 
       const checklistData = await checklistRes.json();
@@ -917,6 +944,8 @@ function DashboardContent() {
       const testsData = await testsRes.json();
       const studyProgressData = await studyProgressRes.json();
       const missingData = await missingRes.json();
+      const booksData = await booksRes.json();
+      setActiveBook(booksData.active || null);
 
       setChecklist(checklistData.items || []);
       setIsSchoolDay(checklistData.isSchoolDay);
@@ -947,6 +976,9 @@ function DashboardContent() {
             daysSince(t.expectedReturnDate) > 0
         )
       );
+      setPendingCorrections(
+        allTests.filter((t: Test) => t.correctionStatus === "pending")
+      );
       setPendingVerification(
         (checklistData.items || []).filter(
           (item: ChecklistItem) =>
@@ -963,6 +995,48 @@ function DashboardContent() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  async function handleAddBook() {
+    if (!newBookTitle.trim() || !newBookDueDate) return;
+    setSavingBook(true);
+    try {
+      await fetch("/api/books", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newBookTitle.trim(),
+          author: newBookAuthor.trim() || null,
+          dueDate: newBookDueDate,
+        }),
+      });
+      setNewBookTitle("");
+      setNewBookAuthor("");
+      setNewBookDueDate("");
+      setShowAddBook(false);
+    } catch (err) {
+      console.error("Failed to add book:", err);
+    }
+    setSavingBook(false);
+    loadData();
+  }
+
+  async function handleRecordBookScore(bookId: number) {
+    const scoreStr = bookScoreInputs[bookId];
+    if (!scoreStr) return;
+    const score = Number(scoreStr);
+    if (isNaN(score) || score < 0 || score > 100) return;
+    await fetch("/api/books", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: bookId, action: "record_score", testScore: score }),
+    });
+    setBookScoreInputs((prev) => {
+      const next = { ...prev };
+      delete next[bookId];
+      return next;
+    });
+    loadData();
+  }
 
   async function handleChecklistToggle(itemId: number) {
     await fetch("/api/checklist", {
@@ -1138,6 +1212,158 @@ function DashboardContent() {
           </div>
         ),
       });
+    }
+
+    // Score correction requests (high priority — parent action required)
+    for (const test of pendingCorrections) {
+      const photos = (test.photoPaths && test.photoPaths.length > 0)
+        ? test.photoPaths
+        : test.photoPath ? [test.photoPath] : [];
+      const isExpanded = expandedCorrection === test.id;
+      actionItems.push({
+        type: "correction",
+        priority: 1,
+        node: (
+          <div key={`correction-${test.id}`} className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: test.subjectColor }} />
+                <span className="text-sm font-medium text-amber-900 truncate">
+                  {test.subjectName}: {test.title}
+                </span>
+              </div>
+              <span className="text-[10px] px-2 py-1 bg-amber-100 text-amber-700 rounded-full font-bold flex-shrink-0 ml-2">SCORE REVIEW</span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white rounded px-2 py-1.5 border border-amber-200">
+                <div className="text-[10px] text-gray-500 uppercase">AI read</div>
+                <div className="font-semibold text-gray-800">
+                  {test.scoreRaw ?? "?"}/{test.scoreTotal ?? "?"}
+                  {test.letterGrade && ` (${test.letterGrade})`}
+                </div>
+              </div>
+              <div className="bg-white rounded px-2 py-1.5 border border-amber-300">
+                <div className="text-[10px] text-amber-700 uppercase">Jack says</div>
+                <div className="font-semibold text-amber-900">
+                  {test.studentProposedScoreRaw ?? "?"}/{test.studentProposedScoreTotal ?? "?"}
+                  {test.studentProposedLetterGrade && ` (${test.studentProposedLetterGrade})`}
+                </div>
+              </div>
+            </div>
+            {test.correctionReason && (
+              <p className="text-xs text-amber-800 mt-2 italic">&ldquo;{test.correctionReason}&rdquo;</p>
+            )}
+            {photos.length > 0 && (
+              <button
+                onClick={() => setExpandedCorrection(isExpanded ? null : test.id)}
+                className="mt-2 text-xs text-amber-700 font-medium hover:text-amber-900 underline"
+              >
+                {isExpanded ? "Hide photos" : `View photos (${photos.length})`}
+              </button>
+            )}
+            {isExpanded && photos.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {photos.map((p, i) => (
+                  <img
+                    key={i}
+                    src={p}
+                    alt={`Graded test page ${i + 1}`}
+                    className="w-full rounded border border-amber-200"
+                  />
+                ))}
+              </div>
+            )}
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={async () => {
+                  await fetch("/api/tests", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: test.id, action: "review_correction", approved: true }),
+                  });
+                  loadData();
+                }}
+                className="flex-1 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+              >
+                Approve Jack&apos;s Score
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch("/api/tests", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: test.id, action: "review_correction", approved: false }),
+                  });
+                  loadData();
+                }}
+                className="flex-1 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200"
+              >
+                Keep AI Score
+              </button>
+            </div>
+          </div>
+        ),
+      });
+    }
+
+    // Book test due (parent needs to give the test and enter a score)
+    if (activeBook) {
+      const due = new Date(activeBook.dueDate + "T00:00:00");
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const isDue = due.getTime() <= now.getTime();
+      if (isDue) {
+        const diffDays = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+        const scoreInput = bookScoreInputs[activeBook.id] || "";
+        actionItems.push({
+          type: "book_test",
+          priority: 1,
+          node: (
+            <div key={`book-${activeBook.id}`} className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-indigo-900 truncate">
+                    Book Test: {activeBook.title}
+                  </div>
+                  {activeBook.author && (
+                    <div className="text-xs text-indigo-700 truncate">by {activeBook.author}</div>
+                  )}
+                </div>
+                <span className="text-[10px] px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full font-bold flex-shrink-0 ml-2">
+                  {diffDays === 0 ? "DUE TODAY" : `${diffDays}D OVERDUE`}
+                </span>
+              </div>
+              <p className="text-xs text-indigo-700 mt-1">
+                Give Jack a reading comprehension test, then enter his score.
+              </p>
+              <div className="mt-3 flex gap-2 items-center">
+                <div className="flex items-center gap-1 flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="Score"
+                    value={scoreInput}
+                    onChange={(e) =>
+                      setBookScoreInputs((prev) => ({ ...prev, [activeBook.id]: e.target.value }))
+                    }
+                    className="w-20 px-2 py-1.5 border border-indigo-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <span className="text-sm text-indigo-700">%</span>
+                </div>
+                <button
+                  onClick={() => handleRecordBookScore(activeBook.id)}
+                  disabled={!scoreInput || isNaN(Number(scoreInput)) || Number(scoreInput) < 0 || Number(scoreInput) > 100}
+                  className="flex-1 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Save Score
+                </button>
+              </div>
+              <p className="text-[10px] text-indigo-600 mt-1">70% or higher passes.</p>
+            </div>
+          ),
+        });
+      }
     }
 
     // Verification queue
@@ -1474,6 +1700,118 @@ function DashboardContent() {
           onConfirm={handlePlannerConfirm}
           onDismiss={() => setPlannerExtraction(null)}
         />
+      )}
+
+      {/* Active book / add book prompt */}
+      {activeBook ? (() => {
+        const due = new Date(activeBook.dueDate + "T00:00:00");
+        const now = new Date();
+        const diffDays = Math.ceil((due.getTime() - now.setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+        const isPastDue = diffDays < 0;
+        const isDueSoon = diffDays >= 0 && diffDays <= 3;
+        return (
+          <div className={`rounded-xl border-2 overflow-hidden ${
+            isPastDue ? "bg-amber-50 border-amber-300" : isDueSoon ? "bg-yellow-50 border-yellow-300" : "bg-indigo-50 border-indigo-200"
+          }`}>
+            <div className="px-4 py-3 flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                isPastDue ? "bg-amber-200" : isDueSoon ? "bg-yellow-200" : "bg-indigo-200"
+              }`}>
+                <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Currently Reading</div>
+                <div className="font-semibold text-gray-900 truncate">{activeBook.title}</div>
+                {activeBook.author && (
+                  <div className="text-xs text-gray-600 truncate">by {activeBook.author}</div>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div className="text-[10px] text-gray-500 uppercase">Test by</div>
+                <div className={`text-sm font-bold ${
+                  isPastDue ? "text-amber-700" : isDueSoon ? "text-yellow-700" : "text-indigo-700"
+                }`}>
+                  {new Date(activeBook.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </div>
+                <div className="text-[10px] text-gray-500">
+                  {isPastDue ? `${Math.abs(diffDays)}d overdue` : diffDays === 0 ? "today" : `${diffDays}d left`}
+                </div>
+              </div>
+            </div>
+            {isPastDue && session?.role === "student" && (
+              <div className="px-4 py-2 bg-amber-100 border-t border-amber-200 text-xs text-amber-800">
+                Your book test is due — ask a parent to give you the test.
+              </div>
+            )}
+          </div>
+        );
+      })() : session?.role === "student" && (
+        <div className="rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 overflow-hidden">
+          {!showAddBook ? (
+            <button
+              onClick={() => setShowAddBook(true)}
+              className="w-full px-4 py-4 flex items-center gap-3 hover:bg-indigo-100 transition-colors text-left"
+            >
+              <div className="w-10 h-10 rounded-lg bg-indigo-200 flex items-center justify-center">
+                <svg className="w-5 h-5 text-indigo-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-indigo-900">Pick your next book</div>
+                <div className="text-xs text-indigo-700">What are you reading this quarter?</div>
+              </div>
+              <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          ) : (
+            <div className="p-4 space-y-3">
+              <h3 className="font-semibold text-indigo-900">Add your next book</h3>
+              <input
+                type="text"
+                placeholder="Book title"
+                value={newBookTitle}
+                onChange={(e) => setNewBookTitle(e.target.value)}
+                className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                autoFocus
+              />
+              <input
+                type="text"
+                placeholder="Author (optional)"
+                value={newBookAuthor}
+                onChange={(e) => setNewBookAuthor(e.target.value)}
+                className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              <div>
+                <label className="block text-xs font-medium text-indigo-700 mb-1">Test by</label>
+                <input
+                  type="date"
+                  value={newBookDueDate}
+                  onChange={(e) => setNewBookDueDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddBook}
+                  disabled={savingBook || !newBookTitle.trim() || !newBookDueDate}
+                  className="flex-1 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {savingBook ? "Adding..." : "Start Reading"}
+                </button>
+                <button
+                  onClick={() => { setShowAddBook(false); setNewBookTitle(""); setNewBookAuthor(""); setNewBookDueDate(""); }}
+                  className="px-4 py-2 text-sm text-indigo-700 hover:bg-indigo-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Missing items from previous days — uses full ChecklistRow so all gates apply */}

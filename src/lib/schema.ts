@@ -405,3 +405,30 @@ export const dailyStats = pgTable("daily_stats", {
   notesExpected: integer("notes_expected").default(0),
   quizAvgScore: real("quiz_avg_score"),
 });
+
+// ── Books ──────────────────────────────────────────────────────────────────────
+// Jack reads two books per quarter. Each book has a due date. When the due
+// date arrives, parents are prompted (via email + dashboard action) to give
+// the test and enter Jack's score. Book becomes "passed" (>=70) or "failed"
+// after the score is recorded.
+
+export const books = pgTable(
+  "books",
+  {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    author: text("author"),
+    dueDate: text("due_date").notNull(), // ISO date
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    status: text("status", {
+      enum: ["active", "passed", "failed"],
+    })
+      .default("active")
+      .notNull(),
+    testScore: real("test_score"), // 0-100 percentage
+    completedAt: timestamp("completed_at"),
+    reviewedBy: integer("reviewed_by").references(() => users.id),
+    notes: text("notes"),
+  },
+  (table) => [index("idx_books_status").on(table.status)]
+);

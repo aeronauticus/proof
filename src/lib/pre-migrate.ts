@@ -201,6 +201,26 @@ async function preMigrate() {
     await sql`UPDATE "tests" SET "photo_paths" = json_build_array("photo_path") WHERE "photo_path" IS NOT NULL`;
   }
 
+  // books: create if missing
+  if (!(await tableExists("books"))) {
+    console.log("  ✓ Creating books table");
+    await sql`
+      CREATE TABLE "books" (
+        "id" SERIAL PRIMARY KEY,
+        "title" TEXT NOT NULL,
+        "author" TEXT,
+        "due_date" TEXT NOT NULL,
+        "started_at" TIMESTAMP DEFAULT NOW() NOT NULL,
+        "status" TEXT DEFAULT 'active' NOT NULL,
+        "test_score" REAL,
+        "completed_at" TIMESTAMP,
+        "reviewed_by" INTEGER REFERENCES "users"("id"),
+        "notes" TEXT
+      )
+    `;
+    await sql`CREATE INDEX "idx_books_status" ON "books" ("status")`;
+  }
+
   await sql.end();
   console.log("Schema migrations complete!");
 }

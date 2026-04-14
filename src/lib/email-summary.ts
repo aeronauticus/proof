@@ -9,6 +9,7 @@ import {
   subjects,
   studySessions,
   studyPlans,
+  books,
 } from "./schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { detectAnomalies, AnomalyFlag } from "./anomaly-detector";
@@ -75,6 +76,13 @@ interface DaySummaryData {
     hasStudyPlan: boolean;
   }>;
   anomalies: AnomalyFlag[];
+  activeBook: {
+    title: string;
+    author: string | null;
+    dueDate: string;
+    daysUntilDue: number;
+    testDueNow: boolean;
+  } | null;
 }
 
 /**
@@ -238,6 +246,26 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
   // Anomalies
   const anomalies = await detectAnomalies(dateStr);
 
+  // Active book
+  const activeBooks = await db
+    .select()
+    .from(books)
+    .where(eq(books.status, "active"));
+  const activeBookRaw = activeBooks[0];
+  let activeBook: DaySummaryData["activeBook"] = null;
+  if (activeBookRaw) {
+    const dueMs = new Date(activeBookRaw.dueDate + "T00:00:00").getTime();
+    const todayMs = new Date(dateStr + "T00:00:00").getTime();
+    const daysUntilDue = Math.ceil((dueMs - todayMs) / (1000 * 60 * 60 * 24));
+    activeBook = {
+      title: activeBookRaw.title,
+      author: activeBookRaw.author,
+      dueDate: activeBookRaw.dueDate,
+      daysUntilDue,
+      testDueNow: daysUntilDue <= 0,
+    };
+  }
+
   return {
     date: dateStr,
     plannerPhotoUploaded: photos.length > 0,
@@ -258,6 +286,7 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
     overdueTests,
     upcomingTests: upcomingTestData,
     anomalies,
+    activeBook,
   };
 }
 
@@ -419,6 +448,39 @@ function buildEmailHtml(data: DaySummaryData): string {
       html += `<p style="margin: 4px 0;">${t.subject}: <strong>${t.title}</strong> — ${dateLabel} (${t.daysUntil} day${t.daysUntil !== 1 ? "s" : ""}) ${t.hasStudyPlan ? "✓ study plan" : '<span style="color: ' + warningColor + ';">no study plan</span>'}</p>`;
     }
     html += `</div>`;
+  }
+
+  // Active book
+  if (data.activeBook) {
+    const b = data.activeBook;
+    const dueDisplay = new Date(b.dueDate + "T00:00:00").toLocaleDateString("en-US", {
+      weekday: "short", month: "short", day: "numeric",
+    });
+    if (b.testDueNow) {
+      const overdueDays = -b.daysUntilDue;
+      html += `<div style="background: #EEF2FF; border: 2px solid #C7D2FE; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <h3 style="color: #4F46E5; margin: 0 0 8px 0;">📖 Book Test Due</h3>
+        <p style="margin: 4px 0;"><strong>${b.title}</strong>${b.author ? ` by ${b.author}` : ""}</p>
+        <p style="margin: 4px 0; color: ${alertColor}; font-weight: 600;">
+          ${overdueDays === 0 ? "Due today" : `${overdueDays} day${overdueDays !== 1 ? "s" : ""} overdue`} — Jack needs to take his reading test. Give the test and enter his score in the app.
+        </p>
+      </div>`;
+    } else if (b.daysUntilDue <= 7) {
+      html += `<div style="margin-bottom: 16px;">
+        <h3 style="margin-bottom: 4px;">Currently Reading</h3>
+        <p style="margin: 0;"><strong>${b.title}</strong>${b.author ? ` by ${b.author}` : ""} — test by ${dueDisplay} <span style="color: ${warningColor};">(${b.daysUntilDue} day${b.daysUntilDue !== 1 ? "s" : ""})</span></p>
+      </div>`;
+    } else {
+      html += `<div style="margin-bottom: 16px;">
+        <h3 style="margin-bottom: 4px;">Currently Reading</h3>
+        <p style="margin: 0;"><strong>${b.title}</strong>${b.author ? ` by ${b.author}` : ""} — test by ${dueDisplay} (${b.daysUntilDue} days)</p>
+      </div>`;
+    }
+  } else {
+    html += `<div style="margin-bottom: 16px;">
+      <h3 style="margin-bottom: 4px;">Currently Reading</h3>
+      <p style="margin: 0; color: ${grayColor};">No active book. Jack will be prompted to pick one.</p>
+    </div>`;
   }
 
   // Footer
