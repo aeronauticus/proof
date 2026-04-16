@@ -69,22 +69,8 @@ export async function detectAnomalies(dateStr: string): Promise<AnomalyFlag[]> {
     });
   }
 
-  // 4. Missing subjects — entered assignments for some subjects but not others
-  if (todayAssignments.length > 0) {
-    const enteredSubjectIds = new Set(todayAssignments.map((a) => a.subjectId));
-    const missing = scheduledSubjectIds.filter((id) => !enteredSubjectIds.has(id));
-    if (missing.length > 0) {
-      // Look up subject names
-      const allSubjects = await db.select().from(subjects);
-      const subjectMap = new Map(allSubjects.map((s) => [s.id, s.name]));
-      const missingNames = missing.map((id) => subjectMap.get(id) || "Unknown");
-      flags.push({
-        type: "missing_subjects",
-        severity: "warning",
-        message: `Missing assignments for: ${missingNames.join(", ")}`,
-      });
-    }
-  }
+  // 4. Missing subjects — removed. Not every subject has homework every day,
+  //    so flagging partial entry creates too many false positives.
 
   // 5. Late test entry — test entered within 1 day of test date
   const recentTests = await db

@@ -1177,15 +1177,32 @@ function DashboardContent() {
         type: "overdue",
         priority: 0,
         node: (
-          <div key={`overdue-${test.id}`} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: test.subjectColor }} />
-              <div>
-                <span className="text-sm font-medium text-red-900">{test.subjectName} {test.type}</span>
-                <span className="text-xs text-red-600 ml-2">— {daysSince(test.expectedReturnDate!)}d overdue</span>
+          <div key={`overdue-${test.id}`} className="p-3 bg-red-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: test.subjectColor }} />
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-red-900">{test.subjectName} {test.type}</span>
+                  <span className="text-xs text-red-600 ml-2">— {daysSince(test.expectedReturnDate!)}d overdue</span>
+                </div>
               </div>
+              <span className="text-[10px] px-2 py-1 bg-red-100 text-red-700 rounded-full font-bold flex-shrink-0">OVERDUE</span>
             </div>
-            <span className="text-[10px] px-2 py-1 bg-red-100 text-red-700 rounded-full font-bold">OVERDUE</span>
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={async () => {
+                  await fetch("/api/tests", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: test.id }),
+                  });
+                  loadData();
+                }}
+                className="text-xs px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg font-medium hover:bg-red-50"
+              >
+                Delete — won&apos;t come in
+              </button>
+            </div>
           </div>
         ),
       });
