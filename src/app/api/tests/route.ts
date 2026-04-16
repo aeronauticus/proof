@@ -301,7 +301,21 @@ export async function DELETE(req: NextRequest) {
 
   if (plans.length > 0) {
     const planIds = plans.map((p) => p.id);
-    await db.delete(studySessions).where(inArray(studySessions.planId, planIds));
+    // Find study sessions to delete
+    const sessions = await db
+      .select({ id: studySessions.id })
+      .from(studySessions)
+      .where(inArray(studySessions.planId, planIds));
+    if (sessions.length > 0) {
+      const sessionIds = sessions.map((s) => s.id);
+      // Clear FK references from checklist items before deleting sessions
+      const { dailyChecklist } = await import("@/lib/schema");
+      await db
+        .update(dailyChecklist)
+        .set({ studySessionId: null })
+        .where(inArray(dailyChecklist.studySessionId, sessionIds));
+      await db.delete(studySessions).where(inArray(studySessions.planId, planIds));
+    }
     await db.delete(studyPlans).where(eq(studyPlans.testId, id));
   }
 
