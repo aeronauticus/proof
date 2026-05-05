@@ -85,6 +85,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        {/* Always-visible reminder sidebar (banner on narrow screens, fixed sidebar on wide) */}
+        <RemindersSidebar />
+
         {/* Main content */}
         <main className="max-w-lg mx-auto px-4 py-4">{children}</main>
 
@@ -122,5 +125,50 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
       </div>
     </SessionContext.Provider>
+  );
+}
+
+/**
+ * Bright red, always-visible reminder.
+ * - Mobile / narrow: sticky banner below header
+ * - Desktop / wide (>= 1280px): fixed left-side sidebar
+ */
+function RemindersSidebar() {
+  return (
+    <>
+      {/* Banner — narrow screens */}
+      <div className="xl:hidden bg-red-600 text-white sticky top-14 z-40 border-y-2 border-red-800">
+        <div className="max-w-lg mx-auto px-4 py-3 space-y-2">
+          <RemindersList />
+        </div>
+      </div>
+
+      {/* Fixed sidebar — wide screens (>=1280px) */}
+      <aside
+        className="hidden xl:block fixed top-0 left-0 h-full w-64 bg-red-600 text-white border-r-2 border-red-800 z-40 overflow-y-auto"
+      >
+        <div className="px-4 py-6 space-y-3">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-red-200">
+            Read every day
+          </div>
+          <RemindersList />
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function RemindersList() {
+  return (
+    <ol className="list-decimal pl-5 space-y-2 text-sm font-bold leading-snug">
+      <li>
+        Do not lie. If you did not legitimately finish an item DO NOT CHECK IT
+        OFF THE LIST!
+      </li>
+      <li className="uppercase">
+        Organize your binders. Bring them home every day. Review your notes
+        every day!!!
+      </li>
+    </ol>
   );
 }
