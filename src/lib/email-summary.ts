@@ -120,31 +120,37 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
   const checklistCompleted = checklistItems.filter((c) => c.completed).length;
   const checklistVerified = checklistItems.filter((c) => c.verifiedBy).length;
 
-  // Assignments due today
+  // Assignments due today — anything past "pending" counts as turned in
+  // (submitted → graded → verified), since Jack uploaded a photo and submitted
   const todayAssignments = await db
     .select()
     .from(assignments)
     .where(eq(assignments.dueDate, dateStr));
   const assignmentsCompleted = todayAssignments.filter(
-    (a) => a.status === "completed" || a.status === "verified"
+    (a) => a.status !== "pending"
   ).length;
   const overdueAssignments = todayAssignments.filter(
     (a) => a.status === "pending"
   ).length;
 
-  // Homework AI alerts
-  const homeworkAiAlerts: HomeworkAiAlert[] = checklistItems
-    .filter((c) => {
-      const eval_ = c.aiHomeworkEval as HomeworkAiAlert | null;
-      return eval_ && (eval_.estimatedCompletionPct < 100 || eval_.parentNote);
+  // Homework AI alerts — read from assignments table (where the new flow
+  // stores per-assignment AI evaluation), not from dailyChecklist
+  const todayPendingAssignments = await db
+    .select()
+    .from(assignments)
+    .where(eq(assignments.dueDate, dateStr));
+  const homeworkAiAlerts: HomeworkAiAlert[] = todayPendingAssignments
+    .filter((a) => {
+      const eval_ = a.aiHomeworkEval as { missingAnswers?: boolean; appearsComplete?: boolean; looksLikeHomework?: boolean } | null;
+      return eval_ && (eval_.missingAnswers || !eval_.appearsComplete || !eval_.looksLikeHomework);
     })
-    .map((c) => {
-      const eval_ = c.aiHomeworkEval as { feedback: string; parentNote: string; estimatedCompletionPct: number; missingAnswers?: boolean; appearsComplete?: boolean };
+    .map((a) => {
+      const eval_ = a.aiHomeworkEval as { feedback: string; parentNote: string; estimatedCompletionPct: number };
       return {
         feedback: eval_.feedback,
         parentNote: eval_.parentNote,
         estimatedCompletionPct: eval_.estimatedCompletionPct,
-        studentConfirmed: !!(c.studentConfirmedComplete),
+        studentConfirmed: !!a.studentConfirmedComplete,
       };
     });
 

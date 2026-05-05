@@ -1,21 +1,16 @@
 import { db } from "./db";
 import {
-  assignments,
   dailyChecklist,
   dailyNotes,
-  scheduleSlots,
   tests,
   plannerPhotos,
-  subjects,
 } from "./schema";
-import { eq, and, sql } from "drizzle-orm";
-import { toISODate } from "./school-days";
+import { eq } from "drizzle-orm";
+import { isBreakDay } from "./school-days";
 
 export interface AnomalyFlag {
   type:
     | "no_planner_photo"
-    | "empty_day"
-    | "missing_subjects"
     | "late_test_entry"
     | "brief_summary"
     | "low_completion";
@@ -24,18 +19,19 @@ export interface AnomalyFlag {
 }
 
 /**
- * Detect anomalies for a given date. Returns an array of flags.
+ * Detect anomalies for a given date. Returns an array of flags meant to
+ * surface things parents would actually want to know — not noisy heuristics.
  */
 export async function detectAnomalies(dateStr: string): Promise<AnomalyFlag[]> {
   const flags: AnomalyFlag[] = [];
 
-  // Determine day of week
+  // Skip non-school days (weekends + holidays/breaks) entirely
   const date = new Date(dateStr + "T00:00:00");
-  const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
-  const dow = days[date.getDay()];
-  if (dow === "sun" || dow === "sat") return flags; // not a school day
+  const dayIdx = date.getDay();
+  if (dayIdx === 0 || dayIdx === 6) return flags;
+  if (await isBreakDay(dateStr)) return flags;
 
-  // 1. No planner photo
+  // 1. No planner photo on a school day
   const photos = await db
     .select()
     .from(plannerPhotos)
@@ -48,31 +44,7 @@ export async function detectAnomalies(dateStr: string): Promise<AnomalyFlag[]> {
     });
   }
 
-  // 2. Get today's scheduled subjects (excluding Math for notes)
-  const todaySlots = await db
-    .select({ subjectId: scheduleSlots.subjectId })
-    .from(scheduleSlots)
-    .where(eq(scheduleSlots.dayOfWeek, dow));
-
-  const scheduledSubjectIds = [...new Set(todaySlots.map((s) => s.subjectId))];
-
-  // 3. Empty day — no assignments entered on a school day
-  const todayAssignments = await db
-    .select()
-    .from(assignments)
-    .where(eq(assignments.assignedDate, dateStr));
-  if (todayAssignments.length === 0 && scheduledSubjectIds.length > 0) {
-    flags.push({
-      type: "empty_day",
-      severity: "warning",
-      message: `No assignments entered on a school day (${scheduledSubjectIds.length} classes today).`,
-    });
-  }
-
-  // 4. Missing subjects — removed. Not every subject has homework every day,
-  //    so flagging partial entry creates too many false positives.
-
-  // 5. Late test entry — test entered within 1 day of test date
+  // 2. Late test entry — test entered within 1 day of test date
   const recentTests = await db
     .select()
     .from(tests)
@@ -92,7 +64,8 @@ export async function detectAnomalies(dateStr: string): Promise<AnomalyFlag[]> {
     }
   }
 
-  // 6. Brief summaries — notes with too_brief evaluation
+  // 3. Brief notes — only fires if the notes feature is active and Jack
+  //    submitted summaries the AI flagged as too brief
   const todayNotes = await db
     .select()
     .from(dailyNotes)
@@ -108,19 +81,22 @@ export async function detectAnomalies(dateStr: string): Promise<AnomalyFlag[]> {
     });
   }
 
-  // 7. Low checklist completion
+  // 4. Low checklist completion — exclude homework quiz items, since those
+  //    have their own deadline (next-day) and would otherwise inflate the
+  //    denominator on graded-homework days. Threshold tightened to <40%.
   const checklistItems = await db
     .select()
     .from(dailyChecklist)
     .where(eq(dailyChecklist.date, dateStr));
-  if (checklistItems.length > 0) {
-    const done = checklistItems.filter((c) => c.completed).length;
-    const pct = Math.round((done / checklistItems.length) * 100);
-    if (pct < 50) {
+  const gradedItems = checklistItems.filter((c) => !c.homeworkQuizId);
+  if (gradedItems.length > 0) {
+    const done = gradedItems.filter((c) => c.completed).length;
+    const pct = Math.round((done / gradedItems.length) * 100);
+    if (pct < 40) {
       flags.push({
         type: "low_completion",
         severity: "alert",
-        message: `Only ${pct}% of checklist items completed (${done}/${checklistItems.length}).`,
+        message: `Only ${pct}% of checklist items completed (${done}/${gradedItems.length}).`,
       });
     }
   }
