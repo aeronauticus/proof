@@ -77,10 +77,20 @@ function HomeworkPageContent() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Upload-graded modal state
+  // Upload-graded modal state (parent uploads teacher's marked version)
   const [uploadingFor, setUploadingFor] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState(false);
   const gradedFileRef = useRef<HTMLInputElement>(null);
+
+  // Per-assignment completed photo upload (Jack uploads his own work)
+  const [uploadingDoneFor, setUploadingDoneFor] = useState<number | null>(null);
+  const [aiWarnings, setAiWarnings] = useState<Record<number, {
+    looksLikeHomework: boolean;
+    appearsComplete: boolean;
+    missingAnswers: boolean;
+    feedback: string;
+  }>>({});
+  const doneFileRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
     const res = await fetch("/api/assignments");
@@ -144,6 +154,65 @@ function HomeworkPageContent() {
       console.error("Quiz submit failed:", err);
     }
     setSubmitting(false);
+  }
+
+  async function handleDonePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0 || uploadingDoneFor === null) return;
+    const assignmentId = uploadingDoneFor;
+    setUploadingDoneFor(null);
+    // Add the photos
+    const formData = new FormData();
+    for (const f of Array.from(files)) {
+      formData.append("photos", f);
+    }
+    formData.append("id", String(assignmentId));
+    formData.append("action", "add_photos");
+    await fetch("/api/assignments", { method: "PATCH", body: formData });
+    if (doneFileRef.current) doneFileRef.current.value = "";
+    loadData();
+  }
+
+  async function handleSubmitAssignment(assignmentId: number) {
+    const res = await fetch("/api/assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignmentId, action: "complete" }),
+    });
+    const data = await res.json();
+    if (data.needsConfirmation && data.aiHomeworkEval) {
+      setAiWarnings((prev) => ({ ...prev, [assignmentId]: data.aiHomeworkEval }));
+    } else {
+      setAiWarnings((prev) => {
+        const next = { ...prev };
+        delete next[assignmentId];
+        return next;
+      });
+    }
+    loadData();
+  }
+
+  async function handleConfirmComplete(assignmentId: number) {
+    await fetch("/api/assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignmentId, action: "confirm_complete" }),
+    });
+    setAiWarnings((prev) => {
+      const next = { ...prev };
+      delete next[assignmentId];
+      return next;
+    });
+    loadData();
+  }
+
+  async function handleAlreadyTurnedIn(assignmentId: number) {
+    await fetch("/api/assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignmentId, action: "already_turned_in" }),
+    });
+    loadData();
   }
 
   async function handleGradedUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -304,7 +373,7 @@ function HomeworkPageContent() {
     <div className="space-y-5">
       <h2 className="text-2xl font-bold text-gray-900">Homework</h2>
 
-      {/* Hidden file input for graded uploads */}
+      {/* Hidden file input for graded uploads (parent → teacher's marked work) */}
       <input
         ref={gradedFileRef}
         type="file"
@@ -313,6 +382,17 @@ function HomeworkPageContent() {
         multiple
         className="hidden"
         onChange={handleGradedUpload}
+      />
+
+      {/* Hidden file input for completed homework uploads (Jack's work) */}
+      <input
+        ref={doneFileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        multiple
+        className="hidden"
+        onChange={handleDonePhotoUpload}
       />
 
       {needsQuiz.length > 0 && (
@@ -361,19 +441,82 @@ function HomeworkPageContent() {
             Open assignments ({dueSoon.length})
           </h3>
           <div className="space-y-2">
-            {dueSoon.map((a) => (
-              <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                <div className="flex items-center gap-2 text-xs text-gray-600">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: a.subjectColor }} />
-                  <span>{a.subjectName}</span>
-                  {a.isProject && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-bold">PROJECT</span>
+            {dueSoon.map((a) => {
+              const photos = a.photoPaths || [];
+              const warning = aiWarnings[a.id];
+              const canSubmit = photos.length > 0;
+              return (
+                <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: a.subjectColor }} />
+                    <span>{a.subjectName}</span>
+                    {a.isProject && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-bold">PROJECT</span>
+                    )}
+                  </div>
+                  <div className="font-medium text-gray-900">{a.title}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">Due {dateLabel(a.dueDate)}</div>
+
+                  {/* Photo previews */}
+                  {photos.length > 0 && (
+                    <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+                      {photos.map((p, i) => (
+                        <img
+                          key={i}
+                          src={p}
+                          alt={`Page ${i + 1}`}
+                          className="h-16 w-16 object-cover rounded border border-gray-200 flex-shrink-0"
+                        />
+                      ))}
+                    </div>
                   )}
+
+                  {/* AI warning */}
+                  {warning && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs text-amber-900 font-medium">
+                        {!warning.looksLikeHomework
+                          ? "This doesn't look like homework."
+                          : warning.missingAnswers
+                            ? "Some answers might be missing."
+                            : "This may not be fully complete."}
+                      </p>
+                      <p className="text-xs text-amber-700 mt-0.5">{warning.feedback}</p>
+                      <button
+                        onClick={() => handleConfirmComplete(a.id)}
+                        className="mt-2 text-xs px-3 py-1.5 bg-amber-600 text-white font-medium rounded-lg hover:bg-amber-700"
+                      >
+                        Submit anyway
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => { setUploadingDoneFor(a.id); doneFileRef.current?.click(); }}
+                      className="text-xs px-3 py-1.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700"
+                    >
+                      {photos.length > 0 ? "Add more photos" : "Take photo"}
+                    </button>
+                    {canSubmit && (
+                      <button
+                        onClick={() => handleSubmitAssignment(a.id)}
+                        className="text-xs px-3 py-1.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700"
+                      >
+                        Submit as Complete
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleAlreadyTurnedIn(a.id)}
+                      className="text-xs px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    >
+                      Already turned in
+                    </button>
+                  </div>
                 </div>
-                <div className="font-medium text-gray-900">{a.title}</div>
-                <div className="text-xs text-gray-500 mt-0.5">Due {dateLabel(a.dueDate)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

@@ -25,6 +25,35 @@ import { uploadDir as getUploadDir, uploadUrl } from "@/lib/uploads";
  * Generate the daily checklist for a given date.
  * Combines fixed templates with dynamic "Review [Subject] Notes" items.
  */
+/**
+ * Returns true if there's pending homework due tomorrow (regular) or
+ * tomorrow OR the day after (project), for the given date.
+ */
+async function hasUpcomingHomework(dateStr: string): Promise<boolean> {
+  const itemDate = new Date(dateStr + "T00:00:00");
+  const tomorrow = new Date(itemDate);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+  const dayAfter = new Date(itemDate);
+  dayAfter.setDate(dayAfter.getDate() + 2);
+  const dayAfterStr = dayAfter.toISOString().split("T")[0];
+
+  const due = await db
+    .select()
+    .from(assignments)
+    .where(
+      and(
+        eq(assignments.status, "pending"),
+        inArray(assignments.dueDate, [tomorrowStr, dayAfterStr])
+      )
+    );
+
+  return due.some((a) =>
+    (!a.isProject && a.dueDate === tomorrowStr) ||
+    (a.isProject && (a.dueDate === tomorrowStr || a.dueDate === dayAfterStr))
+  );
+}
+
 async function generateChecklist(dateStr: string, dayOfWeek: string) {
   // Check if already generated
   const existing = await db
@@ -99,9 +128,15 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
 
   let orderIdx = 0;
 
+  // Decide if Homework wrapper is needed based on actual upcoming work
+  const needsHomework = await hasUpcomingHomework(dateStr);
+
   for (const template of applicableTemplates.sort(
     (a, b) => a.orderIndex - b.orderIndex
   )) {
+    // Skip the Homework template if there's nothing due — prevents daily clutter
+    if (template.title === "Homework" && !needsHomework) continue;
+
     if (template.isDynamic) {
       // Expand "Review [Subject] Notes" for each subject today (except Math)
       for (const slot of reviewSubjects) {
@@ -130,6 +165,24 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
         requiresParent: template.requiresParent,
       });
     }
+  }
+
+  // Fallback: if homework is due tomorrow but the Homework template wasn't
+  // applicable today (e.g. Sunday), add the wrapper anyway so Jack uploads
+  // photos before bed.
+  if (needsHomework && !items.some((i) => i.title === "Homework")) {
+    const hwTemplate = templates.find((t) => t.title === "Homework");
+    orderIdx++;
+    items.push({
+      templateId: hwTemplate?.id || null,
+      date: dateStr,
+      title: "Homework",
+      subjectId: null,
+      studySessionId: null,
+      homeworkQuizId: null,
+      orderIndex: orderIdx,
+      requiresParent: hwTemplate?.requiresParent ?? false,
+    });
   }
 
   // Add study sessions as checklist items
@@ -224,7 +277,34 @@ export async function GET(req: NextRequest) {
 
   // For weekend checklists, generate using "sat" as the day key
   const checklistDow = isWeekend ? "sat" : dow;
-  const items = await generateChecklist(dateStr, checklistDow);
+  let items = await generateChecklist(dateStr, checklistDow);
+
+  // Self-heal: if homework is now due tomorrow but the existing checklist
+  // doesn't have a Homework wrapper, add it (handles checklists generated
+  // before homework was added to the planner).
+  if (!items.some((i) => i.title === "Homework")) {
+    const needs = await hasUpcomingHomework(dateStr);
+    if (needs) {
+      const templates = await db.select().from(checklistTemplates);
+      const hwTemplate = templates.find((t) => t.title === "Homework");
+      const maxOrder = items.reduce((m, i) => Math.max(m, i.orderIndex), 0);
+      await db.insert(dailyChecklist).values({
+        templateId: hwTemplate?.id || null,
+        date: dateStr,
+        title: "Homework",
+        subjectId: null,
+        studySessionId: null,
+        homeworkQuizId: null,
+        orderIndex: maxOrder + 1,
+        requiresParent: hwTemplate?.requiresParent ?? false,
+      });
+      items = await db
+        .select()
+        .from(dailyChecklist)
+        .where(eq(dailyChecklist.date, dateStr))
+        .orderBy(dailyChecklist.orderIndex);
+    }
+  }
 
   // Check if planner photo exists (only relevant on school days)
   let hasPlannerPhoto = false;
