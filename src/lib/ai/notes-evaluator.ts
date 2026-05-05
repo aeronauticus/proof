@@ -39,7 +39,7 @@ export async function evaluateNotes(
           : "image/jpeg";
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 1000,
     messages: [
       {

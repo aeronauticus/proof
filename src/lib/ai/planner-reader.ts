@@ -53,7 +53,7 @@ export async function readPlannerPhoto(
   const subjectList = subjectNames.join(", ");
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 1500,
     messages: [
       {

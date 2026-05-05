@@ -111,7 +111,7 @@ export async function extractMaterialContent(
   const { base64 } = await loadImage(photoPath);
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 2000,
     messages: [
       {

@@ -115,7 +115,7 @@ Respond with this exact JSON and nothing else:
   });
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 3000,
     messages: [{ role: "user", content: blocks }],
   });
@@ -155,7 +155,7 @@ export async function generateHomeworkQuiz(
     : `Jack got every question right on his ${subjectName} ${assignmentTitle} homework. Generate ${targetCount} quiz questions covering the full assignment to confirm mastery.`;
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 2500,
     messages: [{
       role: "user",
@@ -202,7 +202,7 @@ Jack's answer: ${studentAnswers[i] || "(blank)"}
 `).join("\n");
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     max_tokens: 2000,
     messages: [{
       role: "user",
