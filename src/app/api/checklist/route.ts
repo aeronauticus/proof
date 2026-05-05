@@ -614,8 +614,11 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Gate: Practice Latin on Quizlet requires a 15-minute confirmation
-    if (item.title === "Practice Latin on Quizlet") {
+    // Gate: Latin Quizlet requires a 15-minute confirmation
+    if (
+      item.title === "Practice Latin on Quizlet for 15 minutes" ||
+      item.title === "Practice Latin on Quizlet"
+    ) {
       const confirmed = quizletConfirmed === true || quizletConfirmed === "true";
       if (!confirmed) {
         return NextResponse.json(

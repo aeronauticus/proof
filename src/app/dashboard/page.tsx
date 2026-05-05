@@ -596,7 +596,9 @@ function ChecklistRow({
   const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
   const isHomeworkQuiz = !!item.homeworkQuizId;
   const isReviewNotes = item.title.startsWith("Review ") && item.title.endsWith(" Notes") && !!item.subjectId;
-  const isLatinQuizlet = item.title === "Practice Latin on Quizlet";
+  const isLatinQuizlet =
+    item.title === "Practice Latin on Quizlet for 15 minutes" ||
+    item.title === "Practice Latin on Quizlet";
 
   // Completed items — show proof if it exists
   if (item.completed) {

@@ -159,9 +159,9 @@ async function seed() {
         isDynamic: true,
       },
       {
-        title: "Practice Latin on Quizlet",
+        title: "Practice Latin on Quizlet for 15 minutes",
         description:
-          "Open Quizlet and practice your current Latin vocabulary set. Aim for at least one full round.",
+          "Open Quizlet and practice your current Latin vocabulary set for at least 15 minutes.",
         orderIndex: 5,
         applicableDays: schoolDays,
         requiresParent: false,
@@ -199,16 +199,38 @@ async function seed() {
         .set({ applicableDays: everyDay })
         .where(eq(checklistTemplates.title, title));
     }
-    // Add "Practice Latin on Quizlet" if it doesn't exist yet
-    const latinQuizlet = existingTemplates.find(
+    // Rename old "Practice Latin on Quizlet" to the new "...for 15 minutes" title
+    const oldQuizlet = existingTemplates.find(
       (t) => t.title === "Practice Latin on Quizlet"
     );
-    if (!latinQuizlet) {
+    if (oldQuizlet) {
+      await db
+        .update(checklistTemplates)
+        .set({
+          title: "Practice Latin on Quizlet for 15 minutes",
+          description:
+            "Open Quizlet and practice your current Latin vocabulary set for at least 15 minutes.",
+        })
+        .where(eq(checklistTemplates.id, oldQuizlet.id));
+      // Update any existing daily checklist rows that have the old title
+      const { dailyChecklist } = await import("./schema");
+      await db
+        .update(dailyChecklist)
+        .set({ title: "Practice Latin on Quizlet for 15 minutes" })
+        .where(eq(dailyChecklist.title, "Practice Latin on Quizlet"));
+      console.log("  ✓ Renamed Quizlet template + checklist rows to '... for 15 minutes'");
+    }
+
+    // Add "Practice Latin on Quizlet for 15 minutes" if missing entirely
+    const newQuizlet = existingTemplates.find(
+      (t) => t.title === "Practice Latin on Quizlet for 15 minutes"
+    );
+    if (!oldQuizlet && !newQuizlet) {
       const schoolDays = ["mon", "tue", "wed", "thu", "fri"];
       await db.insert(checklistTemplates).values({
-        title: "Practice Latin on Quizlet",
+        title: "Practice Latin on Quizlet for 15 minutes",
         description:
-          "Open Quizlet and practice your current Latin vocabulary set. Aim for at least one full round.",
+          "Open Quizlet and practice your current Latin vocabulary set for at least 15 minutes.",
         orderIndex: 5,
         applicableDays: schoolDays,
         requiresParent: false,
@@ -224,7 +246,7 @@ async function seed() {
         .update(checklistTemplates)
         .set({ orderIndex: 7 })
         .where(eq(checklistTemplates.title, "End-of-Day Check"));
-      console.log("  ✓ Added 'Practice Latin on Quizlet' template");
+      console.log("  ✓ Added 'Practice Latin on Quizlet for 15 minutes' template");
     }
     console.log("  ✓ Checklist templates updated (weekends enabled for Homework & Reading)");
   }
