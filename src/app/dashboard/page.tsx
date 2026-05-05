@@ -248,7 +248,7 @@ function HomeworkSection({
     onReload();
 
     // Check if all assignments are now complete → auto-complete checklist item
-    const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+    const updatedRes = await fetch(`/api/assignments?status=pending&to=${(() => { const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() + 7); return d.toISOString().split("T")[0]; })()}`);
     const updatedData = await updatedRes.json();
     const stillPending = (updatedData.assignments || []).length;
     if (stillPending === 0) {
@@ -275,7 +275,7 @@ function HomeworkSection({
     onReload();
 
     // Check if all done
-    const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+    const updatedRes = await fetch(`/api/assignments?status=pending&to=${(() => { const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() + 7); return d.toISOString().split("T")[0]; })()}`);
     const updatedData = await updatedRes.json();
     if ((updatedData.assignments || []).length === 0) {
       await fetch("/api/checklist", {
@@ -290,7 +290,7 @@ function HomeworkSection({
   if (assignments.length === 0) {
     return (
       <div className="ml-8 space-y-2">
-        <p className="text-xs text-gray-500">No pending assignments due today.</p>
+        <p className="text-xs text-gray-500">No pending homework due tomorrow.</p>
         <div className="flex gap-2">
           <button
             onClick={() => router.push("/assignments/new")}
@@ -355,7 +355,14 @@ function HomeworkSection({
                 <div className="text-sm font-medium text-gray-800 leading-snug">{a.title}</div>
                 <div className="text-[11px] text-gray-400">
                   {a.subjectName}
-                  {isOverdue && <span className="text-red-500 ml-1">(overdue)</span>}
+                  {(() => {
+                    if (isOverdue) return <span className="text-red-500 ml-1">(overdue)</span>;
+                    if (a.dueDate === today) return <span className="text-amber-600 ml-1">(due today)</span>;
+                    const d = new Date(a.dueDate + "T00:00:00");
+                    const label = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                    return <span className="ml-1">(due {label})</span>;
+                  })()}
+                  {a.isProject && <span className="ml-1 text-purple-600">· project</span>}
                 </div>
               </div>
               {a.status !== "pending" ? (
@@ -431,7 +438,7 @@ function HomeworkSection({
                         setSubmitting(null);
                         onReload();
                         // Auto-complete checklist if no more pending
-                        const updatedRes = await fetch(`/api/assignments?status=pending&to=${today}`);
+                        const updatedRes = await fetch(`/api/assignments?status=pending&to=${(() => { const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() + 7); return d.toISOString().split("T")[0]; })()}`);
                         const updatedData = await updatedRes.json();
                         if ((updatedData.assignments || []).length === 0) {
                           await fetch("/api/checklist", {
@@ -951,7 +958,7 @@ function DashboardContent() {
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
           fetch(`/api/assignments?status=pending&from=${today}&to=${today}`),
-          fetch(`/api/assignments?status=pending&to=${today}`), // all pending up to today (for homework)
+          fetch(`/api/assignments?status=pending&to=${(() => { const d = new Date(today + "T00:00:00"); d.setDate(d.getDate() + 7); return d.toISOString().split("T")[0]; })()}`), // pending homework in 7-day window
           fetch(`/api/tests`),
           fetch(`/api/study-progress`),
           fetch(`/api/checklist/missing?date=${today}`),
@@ -987,7 +994,21 @@ function DashboardContent() {
       setHasPlannerPhoto(checklistData.hasPlannerPhoto);
       setSchedule(scheduleData.slots || []);
       setAssignmentsDue(assignmentsData.assignments || []);
-      setHomeworkAssignments(homeworkData.assignments || []);
+      // Filter to assignments matching the Homework wrapper rules
+      const allHw: Assignment[] = homeworkData.assignments || [];
+      const todayDate = new Date(today + "T00:00:00");
+      let nextSchool = new Date(todayDate);
+      nextSchool.setDate(nextSchool.getDate() + 1);
+      while (nextSchool.getDay() === 0 || nextSchool.getDay() === 6) {
+        nextSchool.setDate(nextSchool.getDate() + 1);
+      }
+      const nextSchoolStr = nextSchool.toISOString().split("T")[0];
+      setHomeworkAssignments(
+        allHw.filter((a) => {
+          if (a.isProject) return true; // any pending project in window
+          return a.dueDate === today || a.dueDate === nextSchoolStr;
+        })
+      );
       setMissingItems(missingData.items || []);
       setStudyProgress(
         (studyProgressData.tests || []).filter(
