@@ -203,6 +203,62 @@ function PhotoThumbnails({
 }
 
 /** Per-assignment homework upload flow within the Homework checklist item */
+function QuizletConfirmRow({
+  item,
+  onConfirm,
+}: {
+  item: ChecklistItem;
+  onConfirm: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">15 MIN</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="px-4 py-3 space-y-2 bg-blue-50/40 border-y border-blue-100">
+      <div className="flex items-center gap-3">
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
+        <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
+      </div>
+      <p className="text-xs text-gray-700 ml-8">
+        Did you practice Latin on Quizlet for at least <strong>15 minutes</strong>? Be honest — your parents will check.
+      </p>
+      <div className="ml-8 flex gap-2">
+        <button
+          onClick={async () => {
+            setSubmitting(true);
+            await onConfirm();
+            setSubmitting(false);
+          }}
+          disabled={submitting}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          {submitting ? "Saving..." : "Yes, I did 15 min"}
+        </button>
+        <button
+          onClick={() => setExpanded(false)}
+          className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg"
+        >
+          Not yet
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function HomeworkSection({
   assignments,
   checklistItemId,
@@ -539,6 +595,8 @@ function ChecklistRow({
   const isReading = item.title === "Reading / Memory Work";
   const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
   const isHomeworkQuiz = !!item.homeworkQuizId;
+  const isReviewNotes = item.title.startsWith("Review ") && item.title.endsWith(" Notes") && !!item.subjectId;
+  const isLatinQuizlet = item.title === "Practice Latin on Quizlet";
 
   // Completed items — show proof if it exists
   if (item.completed) {
@@ -694,6 +752,42 @@ function ChecklistRow({
           </div>
         </button>
       </div>
+    );
+  }
+
+  // Review [Subject] Notes — link to per-subject upload page
+  if (isReviewNotes && !item.completed) {
+    const subjectName = item.title.replace(/^Review /, "").replace(/ Notes$/, "");
+    return (
+      <a
+        href={`/notes/${encodeURIComponent(subjectName)}?date=${item.date || ""}`}
+        className="w-full flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">UPLOAD</span>
+      </a>
+    );
+  }
+
+  // Practice Latin on Quizlet — confirm 15-minute completion
+  if (isLatinQuizlet && !item.completed) {
+    return (
+      <QuizletConfirmRow
+        item={item}
+        onConfirm={async () => {
+          const res = await fetch("/api/checklist", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              itemId: item.id,
+              action: "complete",
+              quizletConfirmed: true,
+            }),
+          });
+          if (res.ok) onReload();
+        }}
+      />
     );
   }
 

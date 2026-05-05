@@ -418,6 +418,7 @@ export async function PATCH(req: NextRequest) {
   let action: string;
   let notes: string | null = null;
   let photoFiles: File[] = [];
+  let quizletConfirmed: boolean | string = false;
 
   if (contentType.includes("multipart/form-data")) {
     // FormData — used for photo uploads
@@ -429,12 +430,14 @@ export async function PATCH(req: NextRequest) {
     // Also support single "photo" field for backwards compat
     const single = formData.get("photo") as File | null;
     if (single && photoFiles.length === 0) photoFiles = [single];
+    quizletConfirmed = (formData.get("quizletConfirmed") as string) || false;
   } else {
     // JSON — used for simple complete/verify and reading notes
     const body = await req.json();
     itemId = body.itemId;
     action = body.action;
     notes = body.notes || null;
+    quizletConfirmed = body.quizletConfirmed === true;
   }
 
   // Helper: save multiple photos, return array of paths
@@ -574,6 +577,52 @@ export async function PATCH(req: NextRequest) {
       if (!notes || notes.trim().length < 10) {
         return NextResponse.json(
           { error: "Please describe what you read or practiced (at least a couple sentences)" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Gate: Review [Subject] Notes requires a note photo for that subject + date
+    if (item.title.startsWith("Review ") && item.title.endsWith(" Notes") && item.subjectId) {
+      const { dailyNotes } = await import("@/lib/schema");
+      const note = await db
+        .select()
+        .from(dailyNotes)
+        .where(
+          and(
+            eq(dailyNotes.date, item.date),
+            eq(dailyNotes.subjectId, item.subjectId)
+          )
+        )
+        .then((rows) => rows[0]);
+
+      const hasPhoto = note && (
+        (note.photoPath && note.photoPath.length > 0) ||
+        (Array.isArray(note.photoPaths) && (note.photoPaths as string[]).length > 0)
+      );
+      const hasManualText = note && note.manualNotes && note.manualNotes.trim().length >= 20;
+
+      if (!hasPhoto && !hasManualText) {
+        return NextResponse.json(
+          {
+            error: "Upload a photo of today's notes for this subject (or type them in) before checking off.",
+            requiresNotesUpload: true,
+            subjectId: item.subjectId,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Gate: Practice Latin on Quizlet requires a 15-minute confirmation
+    if (item.title === "Practice Latin on Quizlet") {
+      const confirmed = quizletConfirmed === true || quizletConfirmed === "true";
+      if (!confirmed) {
+        return NextResponse.json(
+          {
+            error: "Confirm you practiced Latin on Quizlet for at least 15 minutes.",
+            requiresQuizletConfirmation: true,
+          },
           { status: 400 }
         );
       }
