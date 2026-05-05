@@ -294,12 +294,16 @@ export async function GET(req: NextRequest) {
   const checklistDow = isWeekend ? "sat" : dow;
   let items = await generateChecklist(dateStr, checklistDow);
 
-  // Self-heal: if homework is now due tomorrow but the existing checklist
-  // doesn't have a Homework wrapper, add it (handles checklists generated
-  // before homework was added to the planner).
-  if (!items.some((i) => i.title === "Homework")) {
+  // Self-heal: keep the Homework wrapper in sync with actual pending work.
+  // - If wrapper missing but homework is due → insert it.
+  // - If wrapper completed but new pending work has appeared → reopen it.
+  // - If wrapper open but no pending work needs photos → leave alone (Jack
+  //   can click "No Homework Today" to clear it).
+  {
     const needs = await hasUpcomingHomework(dateStr);
-    if (needs) {
+    const existing = items.find((i) => i.title === "Homework");
+
+    if (needs && !existing) {
       const templates = await db.select().from(checklistTemplates);
       const hwTemplate = templates.find((t) => t.title === "Homework");
       const maxOrder = items.reduce((m, i) => Math.max(m, i.orderIndex), 0);
@@ -313,6 +317,17 @@ export async function GET(req: NextRequest) {
         orderIndex: maxOrder + 1,
         requiresParent: hwTemplate?.requiresParent ?? false,
       });
+      items = await db
+        .select()
+        .from(dailyChecklist)
+        .where(eq(dailyChecklist.date, dateStr))
+        .orderBy(dailyChecklist.orderIndex);
+    } else if (needs && existing && existing.completed) {
+      // Reopen — new pending homework arrived after wrapper was checked off
+      await db
+        .update(dailyChecklist)
+        .set({ completed: false, completedAt: null })
+        .where(eq(dailyChecklist.id, existing.id));
       items = await db
         .select()
         .from(dailyChecklist)
