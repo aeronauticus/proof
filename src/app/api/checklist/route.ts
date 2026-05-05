@@ -12,7 +12,7 @@ import {
   assignments,
   homeworkQuizzes,
 } from "@/lib/schema";
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull, gte, lte } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
@@ -26,17 +26,31 @@ import { uploadDir as getUploadDir, uploadUrl } from "@/lib/uploads";
  * Combines fixed templates with dynamic "Review [Subject] Notes" items.
  */
 /**
- * Returns true if there's pending homework due tomorrow (regular) or
- * tomorrow OR the day after (project), for the given date.
+ * Compute "next school day" from a reference date — skipping weekends.
+ * If the next calendar day is a weekday, return that. If it's a weekend,
+ * skip to Monday.
+ */
+function nextSchoolDayAfter(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.toISOString().split("T")[0];
+}
+
+/**
+ * Returns true if there's pending homework "imminent" relative to the
+ * given date — meaning Jack needs to upload photos tonight. Rules:
+ * - Regular HW: due today (not yet submitted), OR due the next school day
+ * - Project: due in the next 7 days (gives Jack early visibility)
  */
 async function hasUpcomingHomework(dateStr: string): Promise<boolean> {
+  const nextSchool = nextSchoolDayAfter(dateStr);
   const itemDate = new Date(dateStr + "T00:00:00");
-  const tomorrow = new Date(itemDate);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
-  const dayAfter = new Date(itemDate);
-  dayAfter.setDate(dayAfter.getDate() + 2);
-  const dayAfterStr = dayAfter.toISOString().split("T")[0];
+  const weekOut = new Date(itemDate);
+  weekOut.setDate(weekOut.getDate() + 7);
+  const weekOutStr = weekOut.toISOString().split("T")[0];
 
   const due = await db
     .select()
@@ -44,14 +58,15 @@ async function hasUpcomingHomework(dateStr: string): Promise<boolean> {
     .where(
       and(
         eq(assignments.status, "pending"),
-        inArray(assignments.dueDate, [tomorrowStr, dayAfterStr])
+        gte(assignments.dueDate, dateStr),
+        lte(assignments.dueDate, weekOutStr)
       )
     );
 
-  return due.some((a) =>
-    (!a.isProject && a.dueDate === tomorrowStr) ||
-    (a.isProject && (a.dueDate === tomorrowStr || a.dueDate === dayAfterStr))
-  );
+  return due.some((a) => {
+    if (a.isProject) return true; // any pending project in the 7-day window
+    return a.dueDate === dateStr || a.dueDate === nextSchool;
+  });
 }
 
 async function generateChecklist(dateStr: string, dayOfWeek: string) {
@@ -478,33 +493,32 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Gate: Homework wrapper — every assignment due for the relevant
-    // window (tomorrow, or +2 days for projects) must have at least one
-    // photo uploaded OR be marked already_turned_in
+    // Gate: Homework wrapper — every imminent assignment (matching the
+    // hasUpcomingHomework rules) must have at least one photo uploaded OR
+    // be marked already_turned_in
     if (item.title === "Homework") {
+      const nextSchool = nextSchoolDayAfter(item.date);
       const itemDate = new Date(item.date + "T00:00:00");
-      const tomorrow = new Date(itemDate);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split("T")[0];
-      const dayAfterTomorrow = new Date(itemDate);
-      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
-      const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().split("T")[0];
+      const weekOut = new Date(itemDate);
+      weekOut.setDate(weekOut.getDate() + 7);
+      const weekOutStr = weekOut.toISOString().split("T")[0];
 
       const dueAssignments = await db
         .select()
         .from(assignments)
         .where(
           and(
-            inArray(assignments.dueDate, [tomorrowStr, dayAfterTomorrowStr]),
-            inArray(assignments.status, ["pending"])
+            eq(assignments.status, "pending"),
+            gte(assignments.dueDate, item.date),
+            lte(assignments.dueDate, weekOutStr)
           )
         );
 
-      // Filter: regular homework due tomorrow, or projects due in 2 days
-      const requiringPhoto = dueAssignments.filter((a) =>
-        (!a.isProject && a.dueDate === tomorrowStr) ||
-        (a.isProject && (a.dueDate === tomorrowStr || a.dueDate === dayAfterTomorrowStr))
-      );
+      // Match hasUpcomingHomework rules
+      const requiringPhoto = dueAssignments.filter((a) => {
+        if (a.isProject) return true;
+        return a.dueDate === item.date || a.dueDate === nextSchool;
+      });
 
       const missingPhoto = requiringPhoto.filter((a) => {
         const paths = (a.photoPaths as string[] | null) || [];
