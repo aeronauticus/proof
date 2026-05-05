@@ -201,6 +201,40 @@ async function preMigrate() {
     await sql`UPDATE "tests" SET "photo_paths" = json_build_array("photo_path") WHERE "photo_path" IS NOT NULL`;
   }
 
+  // daily_checklist: add homework_quiz_id for quiz-based items
+  if (!(await columnExists("daily_checklist", "homework_quiz_id"))) {
+    console.log("  ✓ Adding homework_quiz_id column to daily_checklist");
+    await sql`ALTER TABLE "daily_checklist" ADD COLUMN "homework_quiz_id" INTEGER`;
+  }
+
+  // assignments: add homework grading + project columns
+  if (!(await columnExists("assignments", "is_project"))) {
+    console.log("  ✓ Adding homework grading columns to assignments");
+    await sql`ALTER TABLE "assignments" ADD COLUMN "is_project" BOOLEAN DEFAULT FALSE NOT NULL`;
+    await sql`ALTER TABLE "assignments" ADD COLUMN "submitted_at" TIMESTAMP`;
+    await sql`ALTER TABLE "assignments" ADD COLUMN "expected_return_date" TEXT`;
+    await sql`ALTER TABLE "assignments" ADD COLUMN "graded_photo_paths" JSON`;
+    await sql`ALTER TABLE "assignments" ADD COLUMN "graded_at" TIMESTAMP`;
+    await sql`ALTER TABLE "assignments" ADD COLUMN "ai_grading" JSON`;
+  }
+
+  // homework_quizzes: create if missing
+  if (!(await tableExists("homework_quizzes"))) {
+    console.log("  ✓ Creating homework_quizzes table");
+    await sql`
+      CREATE TABLE "homework_quizzes" (
+        "id" SERIAL PRIMARY KEY,
+        "assignment_id" INTEGER NOT NULL REFERENCES "assignments"("id"),
+        "generated_at" TIMESTAMP DEFAULT NOW() NOT NULL,
+        "questions" JSON NOT NULL,
+        "attempts" JSON DEFAULT '[]'::json,
+        "passed_at" TIMESTAMP,
+        "best_score_pct" REAL
+      )
+    `;
+    await sql`CREATE INDEX "idx_hw_quiz_assignment" ON "homework_quizzes" ("assignment_id")`;
+  }
+
   // books: create if missing
   if (!(await tableExists("books"))) {
     console.log("  ✓ Creating books table");

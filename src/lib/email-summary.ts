@@ -10,6 +10,7 @@ import {
   studySessions,
   studyPlans,
   books,
+  homeworkQuizzes,
 } from "./schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { detectAnomalies, AnomalyFlag } from "./anomaly-detector";
@@ -83,6 +84,19 @@ interface DaySummaryData {
     daysUntilDue: number;
     testDueNow: boolean;
   } | null;
+  homeworkGrading: {
+    overdueReturns: Array<{
+      subject: string;
+      title: string;
+      daysOverdue: number;
+      isProject: boolean;
+    }>;
+    pendingQuizzes: Array<{
+      subject: string;
+      title: string;
+      bestScorePct: number | null;
+    }>;
+  };
 }
 
 /**
@@ -266,6 +280,54 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
     };
   }
 
+  // Homework graded-return tracking
+  const submittedHomework = await db
+    .select({
+      id: assignments.id,
+      title: assignments.title,
+      isProject: assignments.isProject,
+      expectedReturnDate: assignments.expectedReturnDate,
+      subjectName: subjects.name,
+    })
+    .from(assignments)
+    .innerJoin(subjects, eq(assignments.subjectId, subjects.id))
+    .where(eq(assignments.status, "submitted"));
+  const overdueReturns = submittedHomework
+    .filter((a) => a.expectedReturnDate && a.expectedReturnDate < dateStr)
+    .map((a) => {
+      const daysOverdue = Math.floor(
+        (new Date(dateStr + "T00:00:00").getTime() -
+          new Date(a.expectedReturnDate! + "T00:00:00").getTime()) /
+          (1000 * 60 * 60 * 24)
+      );
+      return {
+        subject: a.subjectName,
+        title: a.title,
+        daysOverdue,
+        isProject: a.isProject,
+      };
+    });
+
+  // Homework quizzes pending (not passed yet)
+  const allQuizzes = await db
+    .select({
+      assignmentId: homeworkQuizzes.assignmentId,
+      bestScorePct: homeworkQuizzes.bestScorePct,
+      passedAt: homeworkQuizzes.passedAt,
+      title: assignments.title,
+      subjectName: subjects.name,
+    })
+    .from(homeworkQuizzes)
+    .innerJoin(assignments, eq(homeworkQuizzes.assignmentId, assignments.id))
+    .innerJoin(subjects, eq(assignments.subjectId, subjects.id));
+  const pendingQuizzes = allQuizzes
+    .filter((q) => !q.passedAt)
+    .map((q) => ({
+      subject: q.subjectName,
+      title: q.title,
+      bestScorePct: q.bestScorePct,
+    }));
+
   return {
     date: dateStr,
     plannerPhotoUploaded: photos.length > 0,
@@ -287,6 +349,10 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
     upcomingTests: upcomingTestData,
     anomalies,
     activeBook,
+    homeworkGrading: {
+      overdueReturns,
+      pendingQuizzes,
+    },
   };
 }
 
@@ -447,6 +513,30 @@ function buildEmailHtml(data: DaySummaryData): string {
       );
       html += `<p style="margin: 4px 0;">${t.subject}: <strong>${t.title}</strong> — ${dateLabel} (${t.daysUntil} day${t.daysUntil !== 1 ? "s" : ""}) ${t.hasStudyPlan ? "✓ study plan" : '<span style="color: ' + warningColor + ';">no study plan</span>'}</p>`;
     }
+    html += `</div>`;
+  }
+
+  // Homework graded-return overdue
+  if (data.homeworkGrading.overdueReturns.length > 0) {
+    html += `<div style="background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+      <h3 style="color: #92400E; margin: 0 0 8px 0;">📥 Graded Homework Late Coming Back</h3>`;
+    for (const a of data.homeworkGrading.overdueReturns) {
+      const tag = a.isProject ? " (project)" : "";
+      html += `<p style="margin: 4px 0;"><strong>${a.subject}: ${a.title}</strong>${tag} — ${a.daysOverdue} day${a.daysOverdue !== 1 ? "s" : ""} past expected return</p>`;
+    }
+    html += `<p style="margin: 6px 0 0 0; font-size: 12px; color: #78350F;">Once it comes back, upload the graded version on the Homework page so AI can grade it and quiz Jack.</p>`;
+    html += `</div>`;
+  }
+
+  // Pending homework quizzes
+  if (data.homeworkGrading.pendingQuizzes.length > 0) {
+    html += `<div style="margin-bottom: 16px;">
+      <h3 style="margin-bottom: 4px;">Homework Quizzes Pending</h3>`;
+    for (const q of data.homeworkGrading.pendingQuizzes) {
+      const best = q.bestScorePct != null ? ` (best so far: ${q.bestScorePct}%)` : " (not attempted)";
+      html += `<p style="margin: 4px 0;">${q.subject}: <strong>${q.title}</strong>${best}</p>`;
+    }
+    html += `<p style="margin: 6px 0 0 0; font-size: 12px; color: ${grayColor};">Jack must score 90%+ to clear his daily checklist.</p>`;
     html += `</div>`;
   }
 

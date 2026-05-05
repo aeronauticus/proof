@@ -9,8 +9,10 @@ import {
   studyPlans,
   tests,
   plannerPhotos,
+  assignments,
+  homeworkQuizzes,
 } from "@/lib/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
 import { toISODate, isSchoolDay, isBreakDay } from "@/lib/school-days";
@@ -90,6 +92,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
     title: string;
     subjectId: number | null;
     studySessionId: number | null;
+    homeworkQuizId: number | null;
     orderIndex: number;
     requiresParent: boolean;
   }> = [];
@@ -109,6 +112,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
           title: `Review ${slot.subjectName} Notes`,
           subjectId: slot.subjectId,
           studySessionId: null,
+          homeworkQuizId: null,
           orderIndex: orderIdx,
           requiresParent: template.requiresParent,
         });
@@ -121,6 +125,7 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
         title: template.title,
         subjectId: null,
         studySessionId: null,
+        homeworkQuizId: null,
         orderIndex: orderIdx,
         requiresParent: template.requiresParent,
       });
@@ -136,6 +141,35 @@ async function generateChecklist(dateStr: string, dayOfWeek: string) {
       title: `Study for ${session.subjectName} — ${session.testTitle}`,
       subjectId: session.subjectId,
       studySessionId: session.sessionId,
+      homeworkQuizId: null,
+      orderIndex: orderIdx,
+      requiresParent: false,
+    });
+  }
+
+  // Add homework quizzes that haven't been passed yet
+  const pendingQuizzes = await db
+    .select({
+      quizId: homeworkQuizzes.id,
+      assignmentId: homeworkQuizzes.assignmentId,
+      assignmentTitle: assignments.title,
+      subjectId: assignments.subjectId,
+      subjectName: subjects.name,
+    })
+    .from(homeworkQuizzes)
+    .innerJoin(assignments, eq(homeworkQuizzes.assignmentId, assignments.id))
+    .innerJoin(subjects, eq(assignments.subjectId, subjects.id))
+    .where(isNull(homeworkQuizzes.passedAt));
+
+  for (const quiz of pendingQuizzes) {
+    orderIdx++;
+    items.push({
+      templateId: null,
+      date: dateStr,
+      title: `Homework Quiz: ${quiz.subjectName} — ${quiz.assignmentTitle}`,
+      subjectId: quiz.subjectId,
+      studySessionId: null,
+      homeworkQuizId: quiz.quizId,
       orderIndex: orderIdx,
       requiresParent: false,
     });
@@ -364,8 +398,67 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Homework completion is now driven by per-assignment photo uploads
-    // No photo gate on the checklist item itself
+    // Gate: Homework wrapper — every assignment due for the relevant
+    // window (tomorrow, or +2 days for projects) must have at least one
+    // photo uploaded OR be marked already_turned_in
+    if (item.title === "Homework") {
+      const itemDate = new Date(item.date + "T00:00:00");
+      const tomorrow = new Date(itemDate);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split("T")[0];
+      const dayAfterTomorrow = new Date(itemDate);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().split("T")[0];
+
+      const dueAssignments = await db
+        .select()
+        .from(assignments)
+        .where(
+          and(
+            inArray(assignments.dueDate, [tomorrowStr, dayAfterTomorrowStr]),
+            inArray(assignments.status, ["pending"])
+          )
+        );
+
+      // Filter: regular homework due tomorrow, or projects due in 2 days
+      const requiringPhoto = dueAssignments.filter((a) =>
+        (!a.isProject && a.dueDate === tomorrowStr) ||
+        (a.isProject && (a.dueDate === tomorrowStr || a.dueDate === dayAfterTomorrowStr))
+      );
+
+      const missingPhoto = requiringPhoto.filter((a) => {
+        const paths = (a.photoPaths as string[] | null) || [];
+        return paths.length === 0 && !a.studentConfirmedComplete;
+      });
+
+      if (missingPhoto.length > 0) {
+        const titles = missingPhoto.map((a) => a.title).join(", ");
+        return NextResponse.json(
+          {
+            error: `Upload a photo of completed homework first: ${titles}`,
+            missingAssignmentIds: missingPhoto.map((a) => a.id),
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Gate: Homework Quiz items can only be completed via /api/assignments/[id]/quiz
+    // — they auto-complete when Jack scores >=90%. Block manual checking off.
+    if (item.homeworkQuizId) {
+      const quiz = await db
+        .select()
+        .from(homeworkQuizzes)
+        .where(eq(homeworkQuizzes.id, item.homeworkQuizId))
+        .then((rows) => rows[0]);
+
+      if (!quiz || !quiz.passedAt) {
+        return NextResponse.json(
+          { error: "Open the quiz from the Homework page and score 90%+ to clear this." },
+          { status: 400 }
+        );
+      }
+    }
 
     // Gate: Reading / Memory Work requires notes
     if (item.title === "Reading / Memory Work") {

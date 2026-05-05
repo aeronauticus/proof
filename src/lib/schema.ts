@@ -65,7 +65,7 @@ export const assignments = pgTable(
     assignedDate: text("assigned_date").notNull(), // ISO date
     dueDate: text("due_date").notNull(),
     status: text("status", {
-      enum: ["pending", "completed", "verified"],
+      enum: ["pending", "completed", "verified", "submitted", "graded", "graded_returned_overdue"],
     })
       .default("pending")
       .notNull(),
@@ -82,12 +82,70 @@ export const assignments = pgTable(
     studentConfirmedComplete: boolean("student_confirmed_complete").default(false),
     verifiedBy: integer("verified_by").references(() => users.id),
     verifiedAt: timestamp("verified_at"),
+    // Project flag — surfaces 2 nights early on checklist, 30-day return window
+    isProject: boolean("is_project").default(false).notNull(),
+    // Submission tracking (after Jack turns in homework)
+    submittedAt: timestamp("submitted_at"),
+    expectedReturnDate: text("expected_return_date"), // ISO date
+    // Teacher-graded version
+    gradedPhotoPaths: json("graded_photo_paths").$type<string[]>(),
+    gradedAt: timestamp("graded_at"),
+    aiGrading: json("ai_grading").$type<{
+      scoreRaw: number | null;
+      scoreTotal: number | null;
+      scorePct: number | null;
+      letterGrade: string | null;
+      questions: Array<{
+        questionText: string;
+        studentAnswer: string;
+        correctAnswer: string;
+        isCorrect: boolean;
+        teacherNote: string;
+      }>;
+      summary: string;
+    }>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_assignments_due").on(table.dueDate),
     index("idx_assignments_status").on(table.status),
   ]
+);
+
+// ── Homework Quizzes ──────────────────────────────────────────────────────────
+// Generated automatically when AI grades returned homework. Targets wrong
+// answers (or whole sheet if Jack got everything right). Jack must score
+// ≥90% before a daily checklist can be marked complete.
+
+export const homeworkQuizzes = pgTable(
+  "homework_quizzes",
+  {
+    id: serial("id").primaryKey(),
+    assignmentId: integer("assignment_id")
+      .references(() => assignments.id)
+      .notNull(),
+    generatedAt: timestamp("generated_at").defaultNow().notNull(),
+    questions: json("questions").$type<Array<{
+      question: string;
+      choices?: string[];
+      expectedAnswer: string;
+      sourceHint: string;
+      fromWrongAnswer: boolean;
+    }>>().notNull(),
+    attempts: json("attempts").$type<Array<{
+      submittedAt: string;
+      answers: Array<{
+        questionIndex: number;
+        studentAnswer: string;
+        correct: boolean;
+        feedback: string;
+      }>;
+      scorePct: number;
+    }>>().default([]),
+    passedAt: timestamp("passed_at"),
+    bestScorePct: real("best_score_pct"),
+  },
+  (table) => [index("idx_hw_quiz_assignment").on(table.assignmentId)]
 );
 
 // ── Tests / Quizzes ────────────────────────────────────────────────────────────
@@ -329,6 +387,7 @@ export const dailyChecklist = pgTable(
     }>(),
     studentConfirmedComplete: boolean("student_confirmed_complete").default(false),
     studySessionId: integer("study_session_id").references(() => studySessions.id),
+    homeworkQuizId: integer("homework_quiz_id"),
     orderIndex: integer("order_index").notNull(),
     requiresParent: boolean("requires_parent").default(false).notNull(),
     waivedBy: integer("waived_by").references(() => users.id),

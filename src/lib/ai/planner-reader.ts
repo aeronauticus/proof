@@ -9,6 +9,7 @@ export interface PlannerAssignment {
   subject: string;
   title: string;
   dueDate: string; // ISO date
+  isProject: boolean;
 }
 
 export interface PlannerTest {
@@ -84,11 +85,12 @@ IMPORTANT:
 - If you can't read something clearly, skip it rather than guessing.
 - If a due date isn't specified, assume it's due tomorrow (the next school day).
 - Match subjects as closely as possible to the list provided.
+- Mark an assignment as isProject=true if it's a multi-day effort like a project, essay, book report, presentation, science fair, lab write-up, or anything described as a "project" or that wouldn't reasonably be done in one evening. Regular homework (worksheets, problem sets, reading, daily review) is isProject=false.
 
 Respond in this exact JSON format and nothing else:
 {
   "assignments": [
-    {"subject": "<exact subject name from list>", "title": "<assignment description>", "dueDate": "<YYYY-MM-DD>"}
+    {"subject": "<exact subject name from list>", "title": "<assignment description>", "dueDate": "<YYYY-MM-DD>", "isProject": <true/false>}
   ],
   "tests": [
     {"subject": "<exact subject name from list>", "type": "test" or "quiz", "title": "<test/quiz description>", "testDate": "<YYYY-MM-DD>", "topics": "<topics if mentioned, or null>"}

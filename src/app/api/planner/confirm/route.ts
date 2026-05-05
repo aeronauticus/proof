@@ -11,6 +11,7 @@ interface ConfirmAssignment {
   subject: string;
   title: string;
   dueDate: string;
+  isProject?: boolean;
 }
 
 interface ConfirmTest {
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
         title: a.title,
         assignedDate: today,
         dueDate: a.dueDate,
+        isProject: a.isProject || false,
       })
       .returning();
 
@@ -88,6 +90,7 @@ export async function POST(req: NextRequest) {
       subjectId,
       title: a.title,
       dueDate: a.dueDate,
+      isProject: a.isProject || false,
       source: "planner_ai",
     });
 

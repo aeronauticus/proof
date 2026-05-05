@@ -55,6 +55,7 @@ interface ChecklistItem {
   requiresParent: boolean;
   subjectId: number | null;
   studySessionId: number | null;
+  homeworkQuizId: number | null;
   orderIndex: number;
   notes: string | null;
   photoPaths: string[] | null;
@@ -106,6 +107,9 @@ interface Assignment {
   photoPaths: string[] | null;
   aiHomeworkEval: AiHomeworkEval | null;
   studentConfirmedComplete: boolean;
+  isProject?: boolean;
+  submittedAt?: string | null;
+  expectedReturnDate?: string | null;
 }
 
 interface Book {
@@ -527,6 +531,7 @@ function ChecklistRow({
   const isHomework = item.title === "Homework";
   const isReading = item.title === "Reading / Memory Work";
   const isBlocked = item.title === "Organization" && !hasPlannerPhoto;
+  const isHomeworkQuiz = !!item.homeworkQuizId;
 
   // Completed items — show proof if it exists
   if (item.completed) {
@@ -565,6 +570,20 @@ function ChecklistRow({
   }
 
   // Homework items — delegate to HomeworkSection
+  // Homework Quiz item — links to /homework?quiz=X
+  if (isHomeworkQuiz && !item.completed) {
+    return (
+      <a
+        href={`/homework?quiz=${item.homeworkQuizId}`}
+        className="w-full flex items-center gap-3 px-4 py-3 transition-colors hover:bg-blue-50 cursor-pointer active:bg-blue-100"
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-blue-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">QUIZ</span>
+      </a>
+    );
+  }
+
   if (isHomework && !item.completed) {
     return (
       <div className="px-4 py-3 space-y-2">
@@ -902,6 +921,8 @@ function DashboardContent() {
   const [overdueTests, setOverdueTests] = useState<Test[]>([]);
   const [pendingCorrections, setPendingCorrections] = useState<Test[]>([]);
   const [expandedCorrection, setExpandedCorrection] = useState<number | null>(null);
+  const [overdueHomeworkReturns, setOverdueHomeworkReturns] = useState<Assignment[]>([]);
+  const [failedQuizzes, setFailedQuizzes] = useState<Assignment[]>([]);
   const [pendingVerification, setPendingVerification] = useState<ChecklistItem[]>([]);
   const [hasPlannerPhoto, setHasPlannerPhoto] = useState(false);
   const [isSchoolDay, setIsSchoolDay] = useState(true);
@@ -925,7 +946,7 @@ function DashboardContent() {
 
   const loadData = useCallback(async () => {
     try {
-      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes, missingRes, booksRes] =
+      const [checklistRes, scheduleRes, assignmentsRes, homeworkRes, testsRes, studyProgressRes, missingRes, booksRes, allAssignmentsRes] =
         await Promise.all([
           fetch(`/api/checklist?date=${today}`),
           fetch(`/api/schedule?date=${today}`),
@@ -935,6 +956,7 @@ function DashboardContent() {
           fetch(`/api/study-progress`),
           fetch(`/api/checklist/missing?date=${today}`),
           fetch(`/api/books`),
+          fetch(`/api/assignments`), // all assignments (for graded-return tracking)
         ]);
 
       const checklistData = await checklistRes.json();
@@ -945,7 +967,20 @@ function DashboardContent() {
       const studyProgressData = await studyProgressRes.json();
       const missingData = await missingRes.json();
       const booksData = await booksRes.json();
+      const allAssignmentsData = await allAssignmentsRes.json();
       setActiveBook(booksData.active || null);
+
+      const allAssignments: Assignment[] = allAssignmentsData.assignments || [];
+      const todayMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+      setOverdueHomeworkReturns(
+        allAssignments.filter((a) =>
+          a.status === "submitted" &&
+          a.expectedReturnDate &&
+          new Date(a.expectedReturnDate + "T00:00:00").getTime() < todayMs
+        )
+      );
+      // Failed quizzes — graded assignments still without a verified state
+      setFailedQuizzes(allAssignments.filter((a) => a.status === "graded"));
 
       setChecklist(checklistData.items || []);
       setIsSchoolDay(checklistData.isSchoolDay);
@@ -1226,6 +1261,67 @@ function DashboardContent() {
             {item.studentConfirmedComplete && (
               <p className="text-[11px] text-amber-600 mt-1 font-medium">Jack confirmed complete despite warning</p>
             )}
+          </div>
+        ),
+      });
+    }
+
+    // Homework awaiting graded return past expected date
+    for (const a of overdueHomeworkReturns) {
+      const expected = a.expectedReturnDate!;
+      const daysOverdue = Math.floor((new Date(new Date().setHours(0, 0, 0, 0)).getTime() - new Date(expected + "T00:00:00").getTime()) / (1000 * 60 * 60 * 24));
+      actionItems.push({
+        type: "hw_return_overdue",
+        priority: 0,
+        node: (
+          <div key={`hw-overdue-${a.id}`} className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.subjectColor }} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-amber-900 truncate">
+                    {a.subjectName}: {a.title}
+                  </div>
+                  <div className="text-xs text-amber-700">
+                    Graded homework {daysOverdue}d past return date
+                  </div>
+                </div>
+              </div>
+              <span className="text-[10px] px-2 py-1 bg-amber-100 text-amber-800 rounded-full font-bold flex-shrink-0">LATE BACK</span>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => router.push("/homework")}
+                className="text-xs px-3 py-1.5 bg-white text-amber-700 border border-amber-300 rounded-lg font-medium hover:bg-amber-100"
+              >
+                Upload Graded Version
+              </button>
+            </div>
+          </div>
+        ),
+      });
+    }
+
+    // Failed (or unattempted) homework quizzes
+    for (const a of failedQuizzes) {
+      actionItems.push({
+        type: "hw_quiz_pending",
+        priority: 1,
+        node: (
+          <div key={`hw-quiz-${a.id}`} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.subjectColor }} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-blue-900 truncate">
+                    Quiz pending: {a.subjectName} — {a.title}
+                  </div>
+                  <div className="text-xs text-blue-700">
+                    Jack must score 90%+ on the homework quiz to clear his checklist.
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         ),
       });

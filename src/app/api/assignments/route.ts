@@ -4,12 +4,28 @@ import { assignments, subjects } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { logAction } from "@/lib/audit";
-import { toISODate } from "@/lib/school-days";
+import { toISODate, addSchoolDays } from "@/lib/school-days";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { uploadDir as getUploadDir, uploadUrl } from "@/lib/uploads";
 import { evaluateHomeworkPhotos } from "@/lib/ai/homework-evaluator";
+
+/**
+ * Calculate when graded homework is expected back.
+ * Projects: 30 calendar days. Regular homework: 10 school days.
+ */
+async function calculateExpectedReturnDate(
+  fromDate: string,
+  isProject: boolean
+): Promise<string> {
+  if (isProject) {
+    const d = new Date(fromDate + "T00:00:00");
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split("T")[0];
+  }
+  return addSchoolDays(fromDate, 10);
+}
 
 // GET /api/assignments?status=pending&from=2026-03-14&to=2026-03-21
 export async function GET(req: NextRequest) {
@@ -38,13 +54,19 @@ export async function GET(req: NextRequest) {
       aiHomeworkEval: assignments.aiHomeworkEval,
       studentConfirmedComplete: assignments.studentConfirmedComplete,
       verifiedAt: assignments.verifiedAt,
+      isProject: assignments.isProject,
+      submittedAt: assignments.submittedAt,
+      expectedReturnDate: assignments.expectedReturnDate,
+      gradedPhotoPaths: assignments.gradedPhotoPaths,
+      gradedAt: assignments.gradedAt,
+      aiGrading: assignments.aiGrading,
       createdAt: assignments.createdAt,
     })
     .from(assignments)
     .innerJoin(subjects, eq(assignments.subjectId, subjects.id))
     .where(
       and(
-        status ? eq(assignments.status, status as "pending" | "completed" | "verified") : undefined,
+        status ? eq(assignments.status, status as "pending" | "completed" | "verified" | "submitted" | "graded" | "graded_returned_overdue") : undefined,
         from ? gte(assignments.dueDate, from) : undefined,
         to ? lte(assignments.dueDate, to) : undefined
       )
@@ -163,11 +185,17 @@ export async function PATCH(req: NextRequest) {
 
   // Mark as already turned in at school (no photo required)
   if (action === "already_turned_in") {
+    const expectedReturn = await calculateExpectedReturnDate(
+      toISODate(new Date()),
+      assignment.isProject
+    );
     await db
       .update(assignments)
       .set({
-        status: "completed",
+        status: "submitted",
         completedAt: new Date(),
+        submittedAt: new Date(),
+        expectedReturnDate: expectedReturn,
         studentConfirmedComplete: true,
       })
       .where(eq(assignments.id, id));
@@ -216,11 +244,18 @@ export async function PATCH(req: NextRequest) {
       });
     }
 
+    const expectedReturn = await calculateExpectedReturnDate(
+      toISODate(new Date()),
+      assignment.isProject
+    );
+
     await db
       .update(assignments)
       .set({
-        status: "completed",
+        status: "submitted",
         completedAt: new Date(),
+        submittedAt: new Date(),
+        expectedReturnDate: expectedReturn,
         photoPaths: allPaths,
         aiHomeworkEval,
       })
@@ -234,11 +269,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "confirm_complete") {
+    const expectedReturn = await calculateExpectedReturnDate(
+      toISODate(new Date()),
+      assignment.isProject
+    );
     await db
       .update(assignments)
       .set({
-        status: "completed",
+        status: "submitted",
         completedAt: new Date(),
+        submittedAt: new Date(),
+        expectedReturnDate: expectedReturn,
         studentConfirmedComplete: true,
       })
       .where(eq(assignments.id, id));
