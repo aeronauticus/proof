@@ -440,43 +440,24 @@ function SubjectNotesContent() {
             <div className="flex items-center gap-2">
               <span
                 className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  note!.summaryEvaluation === "adequate"
+                  note!.summaryEvaluation !== "unreadable"
                     ? "bg-green-500 text-white"
-                    : note!.summaryEvaluation === "too_brief"
-                      ? "bg-yellow-500 text-white"
-                      : "bg-gray-200 text-gray-500"
+                    : "bg-gray-200 text-gray-500"
                 }`}
               >
-                {note!.summaryEvaluation === "adequate" ? "✓" : "2"}
+                {note!.summaryEvaluation !== "unreadable" ? "✓" : "2"}
               </span>
-              <h3 className="font-semibold text-gray-800">Summary Check</h3>
-              {note!.summaryWordCount != null && (
-                <span className="text-xs text-gray-400 ml-auto">
-                  ~{note!.summaryWordCount} words
-                </span>
-              )}
+              <h3 className="font-semibold text-gray-800">Notes Check</h3>
             </div>
           </div>
 
           <div className="p-4">
-            {note!.summaryEvaluation === "adequate" ? (
+            {note!.summaryEvaluation !== "unreadable" ? (
               <div className="flex items-start gap-2">
                 <span className="text-green-500 text-lg">✓</span>
                 <div>
                   <p className="text-sm font-medium text-green-700">
-                    Good summary!
-                  </p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {note!.summaryFeedback}
-                  </p>
-                </div>
-              </div>
-            ) : note!.summaryEvaluation === "too_brief" ? (
-              <div className="flex items-start gap-2">
-                <span className="text-yellow-500 text-lg">⚠</span>
-                <div>
-                  <p className="text-sm font-medium text-yellow-700">
-                    Summary needs more detail
+                    Notes captured
                   </p>
                   <p className="text-sm text-gray-600 mt-1">
                     {note!.summaryFeedback}

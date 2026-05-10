@@ -473,22 +473,14 @@ function buildEmailHtml(data: DaySummaryData): string {
       <table style="width: 100%; border-collapse: collapse;">
         <tr style="border-bottom: 2px solid #E5E7EB;">
           <th style="text-align: left; padding: 4px 0;">Subject</th>
-          <th style="text-align: center; padding: 4px 0;">Summary</th>
+          <th style="text-align: center; padding: 4px 0;">Notes</th>
           <th style="text-align: right; padding: 4px 0;">Quiz</th>
         </tr>`;
     for (const n of data.notesReport) {
       const evalColor =
-        n.evaluation === "adequate"
-          ? greenColor
-          : n.evaluation === "too_brief"
-            ? warningColor
-            : grayColor;
+        n.evaluation === "adequate" ? greenColor : grayColor;
       const evalLabel =
-        n.evaluation === "adequate"
-          ? "✓ Good"
-          : n.evaluation === "too_brief"
-            ? "✗ Too Brief"
-            : n.evaluation;
+        n.evaluation === "adequate" ? "✓ Uploaded" : n.evaluation;
       html += `<tr style="border-bottom: 1px solid #E5E7EB;">
         <td style="padding: 4px 0;">${n.subject}</td>
         <td style="padding: 4px 0; text-align: center; color: ${evalColor};">${evalLabel}</td>

@@ -6,7 +6,7 @@ import { UPLOAD_BASE } from "@/lib/uploads";
 const anthropic = new Anthropic();
 
 interface NotesEvaluation {
-  summaryEvaluation: "adequate" | "too_brief" | "unreadable";
+  summaryEvaluation: "adequate" | "unreadable";
   summaryWordCount: number;
   feedback: string;
   quizQuestions: Array<{ question: string; expectedAnswer: string }>;
@@ -55,38 +55,17 @@ export async function evaluateNotes(
           },
           {
             type: "text",
-            text: (subjectName === "Grammar" || subjectName === "Latin")
-              ? `You are reviewing a 6th grader's ${subjectName} class notes. ${subjectName} notes typically contain exercises, rules, and examples rather than summaries. Please:
+            text: `You are reviewing a 6th grader's ${subjectName} class notes. Summaries are optional — do NOT grade or critique whether a summary is present or detailed. Just confirm the notes are readable and generate quiz questions.
 
 1. Read and understand the notes content
-2. Do NOT evaluate summary length — ${subjectName} notes don't require summaries. Always set summaryEvaluation to "adequate".
+2. Always set summaryEvaluation to "adequate" if the notes are legible, or "unreadable" if you genuinely can't read them
 3. Generate 2-3 quiz questions that test understanding of the ${subjectName.toLowerCase()} concepts in the notes
 
 Respond in this exact JSON format and nothing else:
 {
-  "summaryEvaluation": "adequate",
+  "summaryEvaluation": "adequate" or "unreadable",
   "summaryWordCount": 0,
   "feedback": "<brief, encouraging feedback about the notes content>",
-  "quizQuestions": [
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"}
-  ]
-}`
-              : `You are reviewing a 6th grader's ${subjectName} class notes. Please:
-
-1. Look for a summary at the bottom of the notes page
-2. Evaluate whether the summary is detailed enough (it should be at least 2-3 sentences and capture the main ideas, not just surface details)
-3. Count the approximate words in the summary
-4. Generate 2-3 quiz questions that test understanding of the material in the notes (not just recall — test comprehension)
-
-A good summary explains the MAIN IDEA and WHY IT MATTERS, not just lists facts.
-
-Respond in this exact JSON format and nothing else:
-{
-  "summaryEvaluation": "adequate" or "too_brief" or "unreadable",
-  "summaryWordCount": <approximate word count of summary>,
-  "feedback": "<specific feedback for the student. If too brief, explain what's missing. If adequate, praise specifically what was good. Be encouraging but honest.>",
   "quizQuestions": [
     {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
     {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
@@ -133,43 +112,18 @@ export async function evaluateManualNotes(
     messages: [
       {
         role: "user",
-        content: (subjectName === "Grammar" || subjectName === "Latin")
-          ? `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
+        content: `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually. Summaries are optional — do NOT grade or critique whether a summary is present.
 
 Here are the notes:
 ${notesText}
 
-${subjectName} notes don't require summaries. Always set summaryEvaluation to "adequate". Generate 2-3 quiz questions that test understanding of the ${subjectName.toLowerCase()} concepts.
+Always set summaryEvaluation to "adequate" if the notes have content, or "unreadable" if the text is empty/garbled. Generate 2-3 quiz questions that test understanding of the ${subjectName.toLowerCase()} concepts.
 
 Respond in this exact JSON format and nothing else:
 {
-  "summaryEvaluation": "adequate",
+  "summaryEvaluation": "adequate" or "unreadable",
   "summaryWordCount": 0,
   "feedback": "<brief, encouraging feedback about the notes content>",
-  "quizQuestions": [
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
-    {"question": "<question>", "expectedAnswer": "<what a good answer would include>"}
-  ]
-}`
-          : `You are reviewing a 6th grader's ${subjectName} class notes that they typed in manually.
-
-Here are the notes:
-${notesText}
-
-Please:
-1. Check if there is a summary section (look for "summary" or the last paragraph that wraps up the material)
-2. Evaluate whether the summary is detailed enough (2-3+ sentences capturing main ideas)
-3. Count the approximate words in the summary portion
-4. Generate 2-3 quiz questions that test understanding (not just recall)
-
-A good summary explains the MAIN IDEA and WHY IT MATTERS, not just lists facts.
-
-Respond in this exact JSON format and nothing else:
-{
-  "summaryEvaluation": "adequate" or "too_brief" or "unreadable",
-  "summaryWordCount": <approximate word count of summary>,
-  "feedback": "<specific feedback for the student>",
   "quizQuestions": [
     {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
     {"question": "<question>", "expectedAnswer": "<what a good answer would include>"},
