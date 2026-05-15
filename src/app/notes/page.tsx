@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import { toLocalISODate } from "@/lib/date-utils";
+import { percentToLetter } from "@/lib/grades";
 
 interface NoteEntry {
   id: number;
@@ -134,10 +135,12 @@ function NotesContent() {
             statusLabel = "Retake Photo";
             statusColor = "text-red-600";
           } else if (isQuizzed && quizPassed) {
-            statusLabel = `Quiz: ${Math.round(note!.quizScore ?? 0)}%`;
+            const pct = Math.round(note!.quizScore ?? 0);
+            statusLabel = `Quiz: ${pct}% (${percentToLetter(pct)})`;
             statusColor = "text-green-600";
           } else if (isQuizzed && !quizPassed) {
-            statusLabel = `${Math.round(note!.quizScore ?? 0)}% — Retake`;
+            const pct = Math.round(note!.quizScore ?? 0);
+            statusLabel = `${pct}% (${percentToLetter(pct)}) — Retake`;
             statusColor = "text-amber-600";
           } else if (isUploaded) {
             statusLabel = "Take Quiz";

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { percentToLetter } from "@/lib/grades";
 
 interface TestScore {
   id: number;
@@ -120,13 +121,17 @@ function StatsContent() {
           <div className="text-2xl font-bold text-green-600">
             {overallAvg != null ? `${overallAvg}%` : "—"}
           </div>
-          <div className="text-xs text-gray-500">Grade Avg</div>
+          <div className="text-xs text-gray-500">
+            Grade Avg{overallAvg != null && ` · ${percentToLetter(overallAvg)}`}
+          </div>
         </div>
         <div className="bg-white rounded-xl p-3 border border-gray-200 text-center">
           <div className="text-2xl font-bold text-purple-600">
             {avgQuizScore != null ? `${avgQuizScore}%` : "—"}
           </div>
-          <div className="text-xs text-gray-500">Quiz Avg</div>
+          <div className="text-xs text-gray-500">
+            Quiz Avg{avgQuizScore != null && ` · ${percentToLetter(avgQuizScore)}`}
+          </div>
         </div>
       </div>
 

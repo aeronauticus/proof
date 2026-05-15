@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { percentToLetter } from "@/lib/grades";
 
 interface Assignment {
   id: number;
@@ -267,7 +268,9 @@ function HomeworkPageContent() {
             Score 90% or higher to pass. {activeQuiz.quiz.questions.length} questions.
           </p>
           {activeQuiz.quiz.bestScorePct !== null && !activeQuiz.quiz.passedAt && (
-            <p className="text-xs text-amber-700 mt-1">Best so far: {activeQuiz.quiz.bestScorePct}%</p>
+            <p className="text-xs text-amber-700 mt-1">
+              Best so far: {activeQuiz.quiz.bestScorePct}% ({percentToLetter(activeQuiz.quiz.bestScorePct)})
+            </p>
           )}
           {activeQuiz.quiz.passedAt && (
             <p className="text-xs text-green-700 mt-1">Passed — but feel free to retry.</p>
@@ -278,8 +281,9 @@ function HomeworkPageContent() {
           <div className={`p-4 rounded-xl border-2 ${lastResult.passed ? "bg-green-50 border-green-300" : "bg-amber-50 border-amber-300"}`}>
             <div className="flex items-center justify-between">
               <div className="font-bold text-lg">{lastResult.passed ? "Passed!" : "Try Again"}</div>
-              <div className={`text-2xl font-bold ${lastResult.passed ? "text-green-700" : "text-amber-700"}`}>
-                {lastResult.scorePct}%
+              <div className={`text-right ${lastResult.passed ? "text-green-700" : "text-amber-700"}`}>
+                <div className="text-2xl font-bold leading-none">{lastResult.scorePct}%</div>
+                <div className="text-sm font-semibold mt-0.5">{percentToLetter(lastResult.scorePct)}</div>
               </div>
             </div>
             <p className="text-xs text-gray-600 mt-1">
@@ -416,6 +420,9 @@ function HomeworkPageContent() {
                     {a.aiGrading && (
                       <div className="mt-1 text-xs text-gray-700">
                         Score: <strong>{a.aiGrading.scorePct ?? "—"}%</strong>
+                        {a.aiGrading.scorePct != null && (
+                          <span className="ml-1">({a.aiGrading.letterGrade || percentToLetter(a.aiGrading.scorePct)})</span>
+                        )}
                         {a.aiGrading.questions.length > 0 && (
                           <span> · {a.aiGrading.questions.filter((q) => !q.isCorrect).length} wrong</span>
                         )}
@@ -582,7 +589,9 @@ function HomeworkPageContent() {
                 <div className="flex items-center justify-between">
                   <div className="font-medium text-gray-900">{a.title}</div>
                   {a.aiGrading?.scorePct != null && (
-                    <span className="text-sm font-bold text-green-700">{a.aiGrading.scorePct}%</span>
+                    <span className="text-sm font-bold text-green-700">
+                      {a.aiGrading.scorePct}% ({a.aiGrading.letterGrade || percentToLetter(a.aiGrading.scorePct)})
+                    </span>
                   )}
                 </div>
               </div>

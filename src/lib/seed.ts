@@ -188,6 +188,16 @@ async function seed() {
         category: "end_of_day",
         isDynamic: false,
       },
+      {
+        title: "Weekly Binder Organization",
+        description:
+          "Remove outdated materials, move graded quizzes and homework into the correct section, and move papers from the front (working) to the back (completed).",
+        orderIndex: 8,
+        applicableDays: ["fri"],
+        requiresParent: true,
+        category: "organization",
+        isDynamic: false,
+      },
     ]);
     console.log("  ✓ Checklist templates created");
   } else {
@@ -248,6 +258,24 @@ async function seed() {
         .where(eq(checklistTemplates.title, "End-of-Day Check"));
       console.log("  ✓ Added 'Practice Latin on Quizlet for 15 minutes' template");
     }
+    // Add Friday-only "Weekly Binder Organization" template if missing
+    const hasWeeklyBinder = existingTemplates.find(
+      (t) => t.title === "Weekly Binder Organization"
+    );
+    if (!hasWeeklyBinder) {
+      await db.insert(checklistTemplates).values({
+        title: "Weekly Binder Organization",
+        description:
+          "Remove outdated materials, move graded quizzes and homework into the correct section, and move papers from the front (working) to the back (completed).",
+        orderIndex: 8,
+        applicableDays: ["fri"],
+        requiresParent: true,
+        category: "organization",
+        isDynamic: false,
+      });
+      console.log("  ✓ Added 'Weekly Binder Organization' template (Fridays)");
+    }
+
     console.log("  ✓ Checklist templates updated (weekends enabled for Homework & Reading)");
   }
 

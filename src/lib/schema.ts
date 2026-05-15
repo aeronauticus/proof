@@ -75,6 +75,7 @@ export const assignments = pgTable(
       looksLikeHomework: boolean;
       appearsComplete: boolean;
       missingAnswers: boolean;
+      underElaborated?: boolean;
       estimatedCompletionPct: number;
       feedback: string;
       parentNote: string;
@@ -381,6 +382,7 @@ export const dailyChecklist = pgTable(
       looksLikeHomework: boolean;
       appearsComplete: boolean;
       missingAnswers: boolean;
+      underElaborated?: boolean;
       estimatedCompletionPct: number;
       feedback: string;
       parentNote: string;

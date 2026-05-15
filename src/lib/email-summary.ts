@@ -15,6 +15,7 @@ import {
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { detectAnomalies, AnomalyFlag } from "./anomaly-detector";
 import { toISODate } from "./school-days";
+import { percentToLetter } from "./grades";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -31,10 +32,15 @@ function getParentEmails(): string[] {
 }
 
 interface HomeworkAiAlert {
+  assignmentTitle: string;
+  subject: string;
   feedback: string;
   parentNote: string;
   estimatedCompletionPct: number;
   studentConfirmed: boolean;
+  underElaborated: boolean;
+  missingAnswers: boolean;
+  photoPaths: string[];
 }
 
 interface DaySummaryData {
@@ -141,16 +147,21 @@ async function gatherDaySummary(dateStr: string): Promise<DaySummaryData> {
     .where(eq(assignments.dueDate, dateStr));
   const homeworkAiAlerts: HomeworkAiAlert[] = todayPendingAssignments
     .filter((a) => {
-      const eval_ = a.aiHomeworkEval as { missingAnswers?: boolean; appearsComplete?: boolean; looksLikeHomework?: boolean } | null;
-      return eval_ && (eval_.missingAnswers || !eval_.appearsComplete || !eval_.looksLikeHomework);
+      const eval_ = a.aiHomeworkEval as { missingAnswers?: boolean; appearsComplete?: boolean; looksLikeHomework?: boolean; underElaborated?: boolean } | null;
+      return eval_ && (eval_.missingAnswers || !eval_.appearsComplete || !eval_.looksLikeHomework || eval_.underElaborated);
     })
     .map((a) => {
-      const eval_ = a.aiHomeworkEval as { feedback: string; parentNote: string; estimatedCompletionPct: number };
+      const eval_ = a.aiHomeworkEval as { feedback: string; parentNote: string; estimatedCompletionPct: number; missingAnswers?: boolean; underElaborated?: boolean };
       return {
+        assignmentTitle: a.title,
+        subject: subjectMap.get(a.subjectId) || "Unknown",
         feedback: eval_.feedback,
         parentNote: eval_.parentNote,
         estimatedCompletionPct: eval_.estimatedCompletionPct,
         studentConfirmed: !!a.studentConfirmedComplete,
+        underElaborated: !!eval_.underElaborated,
+        missingAnswers: !!eval_.missingAnswers,
+        photoPaths: (a.photoPaths as string[] | null) || [],
       };
     });
 
@@ -416,19 +427,54 @@ function buildEmailHtml(data: DaySummaryData): string {
     <p style="margin: 0;"><span style="color: ${checkColor}; font-weight: 600;">${data.checklist.completed}/${data.checklist.total}</span> completed (${checkPct}%) · ${data.checklist.verified} verified by parent</p>
   </div>`;
 
-  // Homework AI Alerts
+  // Homework AI Alerts — show bypassed warnings prominently with photos
   if (data.homeworkAiAlerts.length > 0) {
-    html += `<div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-      <h3 style="color: ${warningColor}; margin: 0 0 8px 0;">Homework Review (AI)</h3>`;
-    for (const alert of data.homeworkAiAlerts) {
-      html += `<p style="margin: 4px 0; font-size: 14px;">${alert.parentNote}</p>`;
-      html += `<p style="margin: 2px 0; font-size: 12px; color: ${grayColor};">Estimated completion: ${alert.estimatedCompletionPct}%`;
-      if (alert.studentConfirmed) {
-        html += ` — <span style="color: ${warningColor}; font-weight: 600;">Jack confirmed complete despite warning</span>`;
+    const baseUrl = process.env.APP_URL || "";
+    const bypassed = data.homeworkAiAlerts.filter((a) => a.studentConfirmed);
+    const open = data.homeworkAiAlerts.filter((a) => !a.studentConfirmed);
+
+    // Bypassed warnings get the louder red treatment + photos
+    if (bypassed.length > 0) {
+      html += `<div style="background: #FEF2F2; border: 2px solid ${alertColor}; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <h3 style="color: ${alertColor}; margin: 0 0 8px 0;">⚠ Jack Bypassed AI Warnings</h3>
+        <p style="margin: 0 0 10px 0; font-size: 12px; color: ${grayColor};">Jack submitted these despite AI flagging issues. Review the photos below.</p>`;
+      for (const alert of bypassed) {
+        const tags: string[] = [];
+        if (alert.underElaborated) tags.push("under-elaborated");
+        if (alert.missingAnswers) tags.push("missing answers");
+        const tagStr = tags.length > 0 ? ` <em style="color: ${alertColor}; font-size: 12px;">(${tags.join(", ")})</em>` : "";
+        html += `<div style="margin: 12px 0; padding-top: 8px; border-top: 1px dashed #FECACA;">
+          <p style="margin: 0; font-weight: 600;">${alert.subject}: ${alert.assignmentTitle}${tagStr}</p>
+          <p style="margin: 4px 0; font-size: 13px;">${alert.parentNote}</p>
+          <p style="margin: 2px 0 6px 0; font-size: 12px; color: ${grayColor};">AI feedback: "${alert.feedback}"</p>`;
+        if (alert.photoPaths.length > 0) {
+          html += `<div style="margin-top: 6px;">`;
+          for (const p of alert.photoPaths) {
+            const url = p.startsWith("http") ? p : `${baseUrl}${p}`;
+            html += `<a href="${url}" style="display: inline-block; margin-right: 6px;"><img src="${url}" alt="homework page" style="width: 110px; height: 110px; object-fit: cover; border-radius: 6px; border: 1px solid #FECACA;" /></a>`;
+          }
+          html += `</div>`;
+        }
+        html += `</div>`;
       }
-      html += `</p>`;
+      html += `</div>`;
     }
-    html += `</div>`;
+
+    // Still-open warnings (not yet bypassed) — milder amber treatment
+    if (open.length > 0) {
+      html += `<div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <h3 style="color: ${warningColor}; margin: 0 0 8px 0;">Homework Review (AI)</h3>`;
+      for (const alert of open) {
+        const tags: string[] = [];
+        if (alert.underElaborated) tags.push("under-elaborated");
+        if (alert.missingAnswers) tags.push("missing answers");
+        const tagStr = tags.length > 0 ? ` <em style="color: ${warningColor}; font-size: 12px;">(${tags.join(", ")})</em>` : "";
+        html += `<p style="margin: 4px 0;"><strong>${alert.subject}: ${alert.assignmentTitle}</strong>${tagStr}</p>`;
+        html += `<p style="margin: 2px 0; font-size: 13px;">${alert.parentNote}</p>`;
+        html += `<p style="margin: 2px 0 8px 0; font-size: 12px; color: ${grayColor};">Estimated completion: ${alert.estimatedCompletionPct}%</p>`;
+      }
+      html += `</div>`;
+    }
   }
 
   // Assignments
@@ -450,7 +496,15 @@ function buildEmailHtml(data: DaySummaryData): string {
     for (const s of data.newScores) {
       html += `<tr style="border-bottom: 1px solid #E5E7EB;">
         <td style="padding: 6px 0;">${s.subject}: ${s.title}</td>
-        <td style="padding: 6px 0; text-align: right; font-weight: 600;">${s.scoreRaw ?? "?"}/${s.scoreTotal ?? "?"} ${s.letterGrade ? `(${s.letterGrade})` : ""}</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: 600;">${s.scoreRaw ?? "?"}/${s.scoreTotal ?? "?"} ${(() => {
+          if (s.letterGrade) return `(${s.letterGrade})`;
+          if (s.scoreRaw != null && s.scoreTotal != null && s.scoreTotal > 0) {
+            const pct = Math.round((s.scoreRaw / s.scoreTotal) * 100);
+            const letter = percentToLetter(pct);
+            return letter ? `(${letter})` : "";
+          }
+          return "";
+        })()}</td>
       </tr>`;
     }
     html += `</table></div>`;
@@ -484,7 +538,7 @@ function buildEmailHtml(data: DaySummaryData): string {
       html += `<tr style="border-bottom: 1px solid #E5E7EB;">
         <td style="padding: 4px 0;">${n.subject}</td>
         <td style="padding: 4px 0; text-align: center; color: ${evalColor};">${evalLabel}</td>
-        <td style="padding: 4px 0; text-align: right;">${n.quizScore != null ? `${Math.round(n.quizScore)}%` : "—"}</td>
+        <td style="padding: 4px 0; text-align: right;">${n.quizScore != null ? `${Math.round(n.quizScore)}% (${percentToLetter(n.quizScore)})` : "—"}</td>
       </tr>`;
     }
     html += `</table></div>`;
@@ -531,7 +585,9 @@ function buildEmailHtml(data: DaySummaryData): string {
     html += `<div style="margin-bottom: 16px;">
       <h3 style="margin-bottom: 4px;">Homework Quizzes Pending</h3>`;
     for (const q of data.homeworkGrading.pendingQuizzes) {
-      const best = q.bestScorePct != null ? ` (best so far: ${q.bestScorePct}%)` : " (not attempted)";
+      const best = q.bestScorePct != null
+        ? ` (best so far: ${q.bestScorePct}% / ${percentToLetter(q.bestScorePct)})`
+        : " (not attempted)";
       html += `<p style="margin: 4px 0;">${q.subject}: <strong>${q.title}</strong>${best}</p>`;
     }
     html += `<p style="margin: 6px 0 0 0; font-size: 12px; color: ${grayColor};">Jack must score 90%+ to clear his daily checklist.</p>`;

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
+import { percentToLetter, scoreToPercent } from "@/lib/grades";
 
 interface Subject {
   id: number;
@@ -619,7 +620,10 @@ function TestDetailContent() {
               <span className="text-gray-500">Score</span>
               <span className="font-bold text-lg">
                 {test.scoreRaw}/{test.scoreTotal}
-                {test.letterGrade && ` (${test.letterGrade})`}
+                {(() => {
+                  const letter = test.letterGrade || percentToLetter(scoreToPercent(test.scoreRaw, test.scoreTotal));
+                  return letter ? ` (${letter})` : "";
+                })()}
               </span>
             </div>
           )}
@@ -1179,11 +1183,12 @@ function TestDetailContent() {
               {test.scoreRaw !== null
                 ? `${test.scoreRaw}/${test.scoreTotal}`
                 : "Could not read"}
-              {test.letterGrade && (
-                <span className="text-lg text-gray-500 ml-2">
-                  ({test.letterGrade})
-                </span>
-              )}
+              {(() => {
+                const letter = test.letterGrade || percentToLetter(scoreToPercent(test.scoreRaw, test.scoreTotal));
+                return letter ? (
+                  <span className="text-lg text-gray-500 ml-2">({letter})</span>
+                ) : null;
+              })()}
             </div>
             {test.aiConfidence !== null && (
               <div className="text-center text-sm text-gray-500 mb-4">

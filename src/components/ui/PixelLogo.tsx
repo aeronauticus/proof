@@ -1,45 +1,73 @@
 "use client";
 
 /**
- * Pixel art "PROOF" logo in a retro video game style.
- * Each letter is drawn on a tiny pixel grid using CSS box-shadow trick.
+ * Proof wordmark — stylish serif, not pixelated.
+ * Pairs a small wax-seal-style monogram with an italic serif wordmark.
  */
 export default function PixelLogo() {
   return (
-    <div className="flex items-center gap-1.5">
-      {/* Shield/checkmark pixel icon */}
-      <svg width="22" height="22" viewBox="0 0 11 11" shapeRendering="crispEdges" className="flex-shrink-0">
-        {/* Shield body */}
-        <rect x="3" y="0" width="5" height="1" fill="#2563eb" />
-        <rect x="2" y="1" width="7" height="1" fill="#2563eb" />
-        <rect x="1" y="2" width="9" height="1" fill="#3b82f6" />
-        <rect x="1" y="3" width="9" height="1" fill="#3b82f6" />
-        <rect x="1" y="4" width="9" height="1" fill="#2563eb" />
-        <rect x="2" y="5" width="7" height="1" fill="#2563eb" />
-        <rect x="2" y="6" width="7" height="1" fill="#1d4ed8" />
-        <rect x="3" y="7" width="5" height="1" fill="#1d4ed8" />
-        <rect x="4" y="8" width="3" height="1" fill="#1e40af" />
-        <rect x="5" y="9" width="1" height="1" fill="#1e40af" />
-        {/* Checkmark */}
-        <rect x="7" y="2" width="1" height="1" fill="#4ade80" />
-        <rect x="6" y="3" width="1" height="1" fill="#4ade80" />
-        <rect x="5" y="4" width="1" height="1" fill="#22c55e" />
-        <rect x="3" y="3" width="1" height="1" fill="#22c55e" />
-        <rect x="4" y="4" width="1" height="1" fill="#22c55e" />
-        <rect x="4" y="5" width="1" height="1" fill="#16a34a" />
+    <div className="flex items-center gap-2">
+      {/* Wax-seal monogram */}
+      <svg
+        width="26"
+        height="26"
+        viewBox="0 0 32 32"
+        className="flex-shrink-0"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="proof-seal-bg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#1e3a8a" />
+            <stop offset="100%" stopColor="#0f172a" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="16"
+          cy="16"
+          r="14.5"
+          fill="url(#proof-seal-bg)"
+          stroke="#dbeafe"
+          strokeWidth="0.75"
+        />
+        <circle
+          cx="16"
+          cy="16"
+          r="12"
+          fill="none"
+          stroke="#dbeafe"
+          strokeWidth="0.5"
+          strokeDasharray="0.5 1.25"
+          opacity="0.7"
+        />
+        <text
+          x="16"
+          y="22"
+          textAnchor="middle"
+          fontFamily="Georgia, 'Times New Roman', serif"
+          fontSize="18"
+          fontStyle="italic"
+          fontWeight="600"
+          fill="#fef3c7"
+        >
+          P
+        </text>
       </svg>
-      {/* Text */}
+
+      {/* Wordmark */}
       <span
-        className="font-bold tracking-wide"
+        className="select-none"
         style={{
-          fontFamily: "var(--font-pixel), 'Courier New', monospace",
-          fontSize: "14px",
-          color: "#1e293b",
-          letterSpacing: "2px",
-          imageRendering: "pixelated",
+          fontFamily:
+            "'Playfair Display', 'Cormorant Garamond', 'Didot', 'Bodoni 72', Georgia, 'Times New Roman', serif",
+          fontStyle: "italic",
+          fontWeight: 600,
+          fontSize: "22px",
+          letterSpacing: "0.5px",
+          color: "#0f172a",
+          lineHeight: 1,
         }}
       >
-        PROOF
+        Proof
       </span>
     </div>
   );

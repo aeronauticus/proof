@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import AppShell, { useSession } from "@/components/ui/AppShell";
+import { percentToLetter } from "@/lib/grades";
 
 interface Book {
   id: number;
@@ -196,6 +197,11 @@ function BooksPageContent() {
                       <div className="text-lg font-bold">
                         {book.testScore != null ? `${Math.round(book.testScore)}%` : "—"}
                       </div>
+                      {book.testScore != null && (
+                        <div className="text-xs font-semibold opacity-80">
+                          {percentToLetter(book.testScore)}
+                        </div>
+                      )}
                       <div className="text-[10px] uppercase font-bold">
                         {passed ? "Passed" : "Failed"}
                       </div>

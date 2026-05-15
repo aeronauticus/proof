@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import AppShell from "@/components/ui/AppShell";
 import { toLocalISODate } from "@/lib/date-utils";
+import { percentToLetter } from "@/lib/grades";
 
 interface QuizQuestion {
   question: string;
@@ -550,7 +551,7 @@ function SubjectNotesContent() {
                         : "text-red-600"
                   }`}
                 >
-                  {Math.round(note!.quizScore)}%
+                  {Math.round(note!.quizScore)}% ({percentToLetter(note!.quizScore)})
                 </span>
               )}
             </div>

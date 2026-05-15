@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AppShell, { useSession } from "@/components/ui/AppShell";
 import { toLocalISODate } from "@/lib/date-utils";
+import { percentToLetter, scoreToPercent } from "@/lib/grades";
 
 interface Test {
   id: number;
@@ -196,7 +197,10 @@ function TestsContent() {
                 {test.scoreRaw !== null && test.scoreTotal !== null && (
                   <span className="text-sm font-semibold">
                     {test.scoreRaw}/{test.scoreTotal}
-                    {test.letterGrade && ` (${test.letterGrade})`}
+                    {(() => {
+                      const letter = test.letterGrade || percentToLetter(scoreToPercent(test.scoreRaw, test.scoreTotal));
+                      return letter ? ` (${letter})` : "";
+                    })()}
                   </span>
                 )}
                 <div className="flex items-center gap-2">

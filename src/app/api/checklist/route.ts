@@ -419,6 +419,11 @@ export async function PATCH(req: NextRequest) {
   let notes: string | null = null;
   let photoFiles: File[] = [];
   let quizletConfirmed: boolean | string = false;
+  let binderChecks: {
+    removedOutdated?: boolean;
+    movedGraded?: boolean;
+    movedFrontToBack?: boolean;
+  } | null = null;
 
   if (contentType.includes("multipart/form-data")) {
     // FormData — used for photo uploads
@@ -438,6 +443,7 @@ export async function PATCH(req: NextRequest) {
     action = body.action;
     notes = body.notes || null;
     quizletConfirmed = body.quizletConfirmed === true;
+    binderChecks = body.binderChecks || null;
   }
 
   // Helper: save multiple photos, return array of paths
@@ -608,6 +614,23 @@ export async function PATCH(req: NextRequest) {
             error: "Upload a photo of today's notes for this subject (or type them in) before checking off.",
             requiresNotesUpload: true,
             subjectId: item.subjectId,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Gate: Weekly Binder Organization needs all 3 sub-tasks confirmed
+    if (item.title === "Weekly Binder Organization") {
+      const confirmed = binderChecks &&
+        binderChecks.removedOutdated === true &&
+        binderChecks.movedGraded === true &&
+        binderChecks.movedFrontToBack === true;
+      if (!confirmed) {
+        return NextResponse.json(
+          {
+            error: "Confirm all three binder organization tasks before checking this off.",
+            requiresBinderChecks: true,
           },
           { status: 400 }
         );

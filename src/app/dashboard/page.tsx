@@ -6,6 +6,7 @@ import AppShell, { useSession } from "@/components/ui/AppShell";
 import Lightbox from "@/components/ui/Lightbox";
 import CelebrationOverlay from "@/components/ui/CelebrationOverlay";
 import { toLocalISODate } from "@/lib/date-utils";
+import { percentToLetter, scoreToPercent } from "@/lib/grades";
 
 interface PlannerAssignment {
   subject: string;
@@ -253,6 +254,101 @@ function QuizletConfirmRow({
           className="px-4 py-2 text-gray-600 text-sm hover:bg-gray-100 rounded-lg"
         >
           Not yet
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BinderOrganizationRow({
+  item,
+  onConfirm,
+}: {
+  item: ChecklistItem;
+  onConfirm: (checks: {
+    removedOutdated: boolean;
+    movedGraded: boolean;
+    movedFrontToBack: boolean;
+  }) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [removedOutdated, setRemovedOutdated] = useState(false);
+  const [movedGraded, setMovedGraded] = useState(false);
+  const [movedFrontToBack, setMovedFrontToBack] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const allChecked = removedOutdated && movedGraded && movedFrontToBack;
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 cursor-pointer active:bg-gray-100"
+      >
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm text-gray-800">{item.title}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">FRIDAY</span>
+      </button>
+    );
+  }
+
+  const CheckRow = ({
+    checked,
+    onChange,
+    label,
+  }: {
+    checked: boolean;
+    onChange: (v: boolean) => void;
+    label: string;
+  }) => (
+    <label className="flex items-start gap-2 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 w-4 h-4"
+      />
+      <span className="text-sm text-gray-800">{label}</span>
+    </label>
+  );
+
+  return (
+    <div className="px-4 py-3 space-y-2 bg-amber-50/40 border-y border-amber-100">
+      <div className="flex items-center gap-3">
+        <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex-shrink-0" />
+        <span className="flex-1 text-sm font-medium text-gray-800">{item.title}</span>
+        <button onClick={() => setExpanded(false)} className="text-xs text-gray-400">Cancel</button>
+      </div>
+      <p className="text-xs text-gray-600 ml-8 mb-2">
+        Confirm each step before checking off. Be honest — a parent has to verify.
+      </p>
+      <div className="ml-8 space-y-2">
+        <CheckRow
+          checked={removedOutdated}
+          onChange={setRemovedOutdated}
+          label="Removed outdated materials"
+        />
+        <CheckRow
+          checked={movedGraded}
+          onChange={setMovedGraded}
+          label="Moved graded quizzes and homework into the correct section"
+        />
+        <CheckRow
+          checked={movedFrontToBack}
+          onChange={setMovedFrontToBack}
+          label="Moved papers from the front (working) to the back (completed) section"
+        />
+      </div>
+      <div className="ml-8 flex gap-2 pt-2">
+        <button
+          onClick={async () => {
+            setSubmitting(true);
+            await onConfirm({ removedOutdated, movedGraded, movedFrontToBack });
+            setSubmitting(false);
+          }}
+          disabled={submitting || !allChecked}
+          className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          {submitting ? "Saving..." : "All three done"}
         </button>
       </div>
     </div>
@@ -599,6 +695,7 @@ function ChecklistRow({
   const isLatinQuizlet =
     item.title === "Practice Latin on Quizlet for 15 minutes" ||
     item.title === "Practice Latin on Quizlet";
+  const isBinder = item.title === "Weekly Binder Organization";
 
   // Completed items — show proof if it exists
   if (item.completed) {
@@ -785,6 +882,27 @@ function ChecklistRow({
               itemId: item.id,
               action: "complete",
               quizletConfirmed: true,
+            }),
+          });
+          if (res.ok) onReload();
+        }}
+      />
+    );
+  }
+
+  // Weekly Binder Organization — 3 sub-checks
+  if (isBinder && !item.completed) {
+    return (
+      <BinderOrganizationRow
+        item={item}
+        onConfirm={async (checks) => {
+          const res = await fetch("/api/checklist", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              itemId: item.id,
+              action: "complete",
+              binderChecks: checks,
             }),
           });
           if (res.ok) onReload();
@@ -1469,14 +1587,20 @@ function DashboardContent() {
                 <div className="text-[10px] text-gray-500 uppercase">AI read</div>
                 <div className="font-semibold text-gray-800">
                   {test.scoreRaw ?? "?"}/{test.scoreTotal ?? "?"}
-                  {test.letterGrade && ` (${test.letterGrade})`}
+                  {(() => {
+                    const letter = test.letterGrade || percentToLetter(scoreToPercent(test.scoreRaw, test.scoreTotal));
+                    return letter ? ` (${letter})` : "";
+                  })()}
                 </div>
               </div>
               <div className="bg-white rounded px-2 py-1.5 border border-amber-300">
                 <div className="text-[10px] text-amber-700 uppercase">Jack says</div>
                 <div className="font-semibold text-amber-900">
                   {test.studentProposedScoreRaw ?? "?"}/{test.studentProposedScoreTotal ?? "?"}
-                  {test.studentProposedLetterGrade && ` (${test.studentProposedLetterGrade})`}
+                  {(() => {
+                    const letter = test.studentProposedLetterGrade || percentToLetter(scoreToPercent(test.studentProposedScoreRaw, test.studentProposedScoreTotal));
+                    return letter ? ` (${letter})` : "";
+                  })()}
                 </div>
               </div>
             </div>

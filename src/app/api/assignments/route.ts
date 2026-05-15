@@ -229,8 +229,8 @@ export async function PATCH(req: NextRequest) {
       console.error("Assignment AI evaluation failed:", err);
     }
 
-    // If AI flags issues, require confirmation
-    if (aiHomeworkEval && (aiHomeworkEval.missingAnswers || !aiHomeworkEval.appearsComplete || !aiHomeworkEval.looksLikeHomework)) {
+    // If AI flags issues (including under-elaboration), require confirmation
+    if (aiHomeworkEval && (aiHomeworkEval.missingAnswers || !aiHomeworkEval.appearsComplete || !aiHomeworkEval.looksLikeHomework || aiHomeworkEval.underElaborated)) {
       await db
         .update(assignments)
         .set({ photoPaths: allPaths, aiHomeworkEval })
